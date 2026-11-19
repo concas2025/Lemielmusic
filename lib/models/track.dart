@@ -81,6 +81,28 @@ class LyricLine {
   const LyricLine({this.time, required this.text});
 }
 
+class LyricsResult {
+  final List<LyricLine> lines;
+  final String providerId;
+  final String providerName;
+
+  const LyricsResult({
+    required this.lines,
+    required this.providerId,
+    required this.providerName,
+  });
+
+  bool get isEmpty => lines.isEmpty;
+  bool get isNotEmpty => lines.isNotEmpty;
+  bool get isSynced => lines.any((l) => l.time != null);
+
+  static const empty = LyricsResult(
+    lines: [],
+    providerId: '',
+    providerName: '',
+  );
+}
+
 class ResolvedAudioStream {
   final String url;
   final int contentLength;

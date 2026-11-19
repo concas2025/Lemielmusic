@@ -4,7 +4,9 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/track.dart';
+import '../models/user_profile.dart';
 import 'local_audio_proxy.dart';
+import 'settings_controller.dart';
 import 'storage_service.dart';
 import 'ytm_service.dart';
 
@@ -13,6 +15,7 @@ enum PlayerRepeatMode { off, all, one }
 class PlayerController extends ChangeNotifier {
   final YtmService ytm;
   final StorageService storage;
+  final SettingsController settingsController;
   final AudioPlayer _player = AudioPlayer(useProxyForRequestHeaders: false);
   final LocalAudioProxy _proxy = LocalAudioProxy();
 
@@ -30,10 +33,19 @@ class PlayerController extends ChangeNotifier {
   List<Track> _favorites = [];
   List<Track> _history = [];
   List<String> _searchHistory = [];
+  List<LocalPlaylist> _playlists = [];
+
+  Timer? _sleepTickTimer;
+  DateTime? _sleepEndsAt;
+  Duration? _sleepRemaining;
 
   final List<StreamSubscription<dynamic>> _subs = [];
 
-  PlayerController({required this.ytm, required this.storage});
+  PlayerController({
+    required this.ytm,
+    required this.storage,
+    required this.settingsController,
+  });
 
   List<Track> get queue => List.unmodifiable(_queue);
   int get currentIndex => _currentIndex;
@@ -54,6 +66,10 @@ class PlayerController extends ChangeNotifier {
   List<Track> get favorites => List.unmodifiable(_favorites);
   List<Track> get history => List.unmodifiable(_history);
   List<String> get searchHistory => List.unmodifiable(_searchHistory);
+  List<LocalPlaylist> get playlists => List.unmodifiable(_playlists);
+  Duration? get sleepTimerRemaining => _sleepRemaining;
+  bool get isCurrentTrackCached =>
+      currentTrack != null && _proxy.isFullyCached(currentTrack!.id);
 
   bool isFavorite(String id) => _favorites.any((t) => t.id == id);
 
@@ -62,6 +78,9 @@ class PlayerController extends ChangeNotifier {
     _favorites = storage.loadFavorites();
     _history = storage.loadHistory();
     _searchHistory = storage.loadSearchHistory();
+    _playlists = storage.loadPlaylists();
+
+    settingsController.addListener(_syncAudioLabSettings);
 
     try {
       final session = await AudioSession.instance;
@@ -101,7 +120,56 @@ class PlayerController extends ChangeNotifier {
       notifyListeners();
     }));
 
+    _syncAudioLabSettings();
     notifyListeners();
+  }
+
+  void _syncAudioLabSettings() {
+    final s = settingsController.settings;
+    unawaited(_applySpeedAndPitch(s.playbackSpeed, s.playbackPitch));
+  }
+
+  Future<void> _applySpeedAndPitch(double speed, double pitch) async {
+    try {
+      if ((_player.speed - speed).abs() > 0.01) {
+        await _player.setSpeed(speed);
+      }
+      if ((_player.pitch - pitch).abs() > 0.01) {
+        await _player.setPitch(pitch);
+      }
+    } catch (_) {
+      // Some platforms do not support pitch shifting; keep speed working.
+    }
+  }
+
+  void setSleepTimer(Duration duration) {
+    _sleepTickTimer?.cancel();
+    _sleepEndsAt = DateTime.now().add(duration);
+    _sleepRemaining = duration;
+    notifyListeners();
+
+    _sleepTickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final endsAt = _sleepEndsAt;
+      if (endsAt == null) return;
+      final left = endsAt.difference(DateTime.now());
+      if (left <= Duration.zero) {
+        cancelSleepTimer();
+        unawaited(_player.pause());
+      } else {
+        _sleepRemaining = left;
+        notifyListeners();
+      }
+    });
+  }
+
+  void cancelSleepTimer() {
+    _sleepTickTimer?.cancel();
+    _sleepTickTimer = null;
+    _sleepEndsAt = null;
+    if (_sleepRemaining != null) {
+      _sleepRemaining = null;
+      notifyListeners();
+    }
   }
 
   void clearError() {
@@ -150,6 +218,30 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  Future<Uri> resolveLocalVideoUri(String videoId) async {
+    final resolved = await ytm.resolveVideoStream(videoId);
+    return _proxy.registerStream(
+      '${videoId}_mv',
+      resolved,
+      enableCache: false,
+    );
+  }
+
+  Future<void> pauseForVideo() async {
+    if (_player.playing) {
+      await _player.pause();
+    }
+  }
+
+  Future<void> resumeFromVideo(Duration position, {required bool shouldPlay}) async {
+    try {
+      await _player.seek(position);
+      if (shouldPlay) {
+        await _player.play();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _startCurrentTrack() async {
     final track = currentTrack;
     if (track == null) return;
@@ -161,10 +253,12 @@ class PlayerController extends ChangeNotifier {
         ? Duration(seconds: track.durationSeconds)
         : Duration.zero;
     _recordHistory(track);
+    settingsController.recordTrackPlay(track.artist);
     notifyListeners();
 
     try {
-      final resolved = await ytm.resolveAudioStream(track.id);
+      final quality = settingsController.settings.audioQuality;
+      final resolved = await ytm.resolveAudioStream(track.id, quality: quality);
       if (seq != _playSeq) return;
 
       final playUri = await _proxy.registerStream(track.id, resolved);
@@ -177,11 +271,13 @@ class PlayerController extends ChangeNotifier {
       await _player.setAudioSource(source);
       if (seq != _playSeq) return;
 
+      final s = settingsController.settings;
+      await _applySpeedAndPitch(s.playbackSpeed, s.playbackPitch);
+
       _isLoadingStream = false;
       notifyListeners();
       await _player.play();
 
-      // Prefetch Up Next recommendations silently when near the end of the queue.
       if (_currentIndex >= _queue.length - 2) {
         unawaited(_appendRadioTracks(track.id));
       }
@@ -308,6 +404,54 @@ class PlayerController extends ChangeNotifier {
     await storage.saveFavorites(_favorites);
   }
 
+  Future<LocalPlaylist> createPlaylist(String name, {List<Track>? tracks}) async {
+    final trimmed = name.trim();
+    final playlist = LocalPlaylist(
+      id: 'pl_${DateTime.now().millisecondsSinceEpoch}',
+      name: trimmed.isNotEmpty ? trimmed : 'Playlist của tôi',
+      tracks: tracks ?? const [],
+      createdAt: DateTime.now().toIso8601String(),
+      sourcePlatform: 'local',
+    );
+    _playlists.insert(0, playlist);
+    notifyListeners();
+    await storage.savePlaylists(_playlists);
+    return playlist;
+  }
+
+  Future<void> addPlaylist(LocalPlaylist playlist) async {
+    _playlists.insert(0, playlist);
+    notifyListeners();
+    await storage.savePlaylists(_playlists);
+  }
+
+  Future<void> addTrackToPlaylist(String playlistId, Track track) async {
+    final idx = _playlists.indexWhere((p) => p.id == playlistId);
+    if (idx == -1) return;
+    final pl = _playlists[idx];
+    if (pl.tracks.any((t) => t.id == track.id)) return;
+    _playlists[idx] = pl.copyWith(tracks: [...pl.tracks, track]);
+    notifyListeners();
+    await storage.savePlaylists(_playlists);
+  }
+
+  Future<void> removeTrackFromPlaylist(String playlistId, String trackId) async {
+    final idx = _playlists.indexWhere((p) => p.id == playlistId);
+    if (idx == -1) return;
+    final pl = _playlists[idx];
+    _playlists[idx] = pl.copyWith(
+      tracks: pl.tracks.where((t) => t.id != trackId).toList(),
+    );
+    notifyListeners();
+    await storage.savePlaylists(_playlists);
+  }
+
+  Future<void> deletePlaylist(String playlistId) async {
+    _playlists.removeWhere((p) => p.id == playlistId);
+    notifyListeners();
+    await storage.savePlaylists(_playlists);
+  }
+
   void _recordHistory(Track track) {
     _history.removeWhere((t) => t.id == track.id);
     _history.insert(0, track);
@@ -337,6 +481,8 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    settingsController.removeListener(_syncAudioLabSettings);
+    _sleepTickTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }

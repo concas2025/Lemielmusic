@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import '../models/app_settings.dart';
 import '../models/track.dart';
 
 class _CachedStream {
@@ -14,6 +15,8 @@ class YtmService {
       'https://music.youtube.com/youtubei/v1/search?prettyPrint=false';
   static const _ytmNextUrl =
       'https://music.youtube.com/youtubei/v1/next?prettyPrint=false';
+  static const _ytmBrowseUrl =
+      'https://music.youtube.com/youtubei/v1/browse?prettyPrint=false';
   static const _ytPlayerUrl =
       'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
 
@@ -39,6 +42,7 @@ class YtmService {
 
   final YoutubeExplode _yt = YoutubeExplode();
   final Map<String, _CachedStream> _streamCache = {};
+  final Map<String, _CachedStream> _videoCache = {};
   final Map<String, List<Track>> _moodCache = {};
 
   Future<Map<String, dynamic>?> _postInnertube(
@@ -82,7 +86,6 @@ class YtmService {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
 
-    // Try YouTube Music InnerTube "Songs" filter first for clean square artwork & metadata.
     try {
       final data = await _postInnertube(_ytmSearchUrl, {
         'query': trimmed,
@@ -97,11 +100,8 @@ class YtmService {
             .toList(growable: false);
         if (parsed.isNotEmpty) return parsed;
       }
-    } catch (_) {
-      // Fall through to YoutubeExplode search below.
-    }
+    } catch (_) {}
 
-    // Fallback to standard YouTube search via youtube_explode_dart.
     final videos = await _yt.search.search(trimmed);
     return videos
         .where((v) => v.duration != null && v.duration!.inSeconds > 15)
@@ -138,16 +138,48 @@ class YtmService {
     }
   }
 
-  /// Resolves a verified audio/mp4 stream (with exact byte length) for iOS AVPlayer.
-  Future<ResolvedAudioStream> resolveAudioStream(String videoId) async {
-    final cached = _streamCache[videoId];
+  /// Fetches tracks from a public YouTube / YouTube Music playlist ID.
+  Future<({String title, List<Track> tracks})> fetchPlaylist(
+    String playlistId,
+  ) async {
+    final browseId =
+        playlistId.startsWith('VL') ? playlistId : 'VL$playlistId';
+    final data = await _postInnertube(_ytmBrowseUrl, {'browseId': browseId});
+    if (data == null) {
+      throw Exception('Không thể tải playlist YouTube Music.');
+    }
+
+    String title = 'Playlist YouTube Music';
+    final headers = <Map<String, dynamic>>[];
+    _collectByKey(data, 'musicResponsiveHeaderRenderer', headers);
+    _collectByKey(data, 'musicDetailHeaderRenderer', headers);
+    if (headers.isNotEmpty) {
+      final t = _runsText(headers.first['title']?['runs'] as List? ?? const []);
+      if (t.isNotEmpty) title = t;
+    }
+
+    final items = <Map<String, dynamic>>[];
+    _collectByKey(data, 'musicResponsiveListItemRenderer', items);
+    final tracks = items
+        .map(_parseResponsiveItem)
+        .whereType<Track>()
+        .toList(growable: false);
+    return (title: title, tracks: tracks);
+  }
+
+  /// Resolves a verified audio/mp4 stream matching the selected [AudioQualityTier].
+  Future<ResolvedAudioStream> resolveAudioStream(
+    String videoId, {
+    AudioQualityTier quality = AudioQualityTier.high,
+  }) async {
+    final cacheKey = '${videoId}_${quality.name}';
+    final cached = _streamCache[cacheKey];
     if (cached != null && DateTime.now().isBefore(cached.expiresAt)) {
       return cached.stream;
     }
 
     final errors = <String>[];
 
-    // 1. Fast direct InnerTube player API (ANDROID client — avoids video HEAD timeout).
     final androidStream = await _resolveViaInnertubePlayer(
       videoId,
       clientPayload: {
@@ -159,13 +191,13 @@ class YtmService {
         'osVersion': '11',
       },
       userAgent: _androidUa,
+      quality: quality,
       errors: errors,
     );
     if (androidStream != null) {
-      return _cacheStream(videoId, androidStream);
+      return _cacheAudio(cacheKey, androidStream);
     }
 
-    // 2. Direct InnerTube player API (IOS client fallback).
     final iosStream = await _resolveViaInnertubePlayer(
       videoId,
       clientPayload: {
@@ -179,23 +211,24 @@ class YtmService {
         'osVersion': '18.3.2.22D82',
       },
       userAgent: _iosUa,
+      quality: quality,
       errors: errors,
     );
     if (iosStream != null) {
-      return _cacheStream(videoId, iosStream);
+      return _cacheAudio(cacheKey, iosStream);
     }
 
-    // 3. Fallback to youtube_explode_dart (handles signature-protected tracks).
     try {
       final manifest = await _yt.videos.streamsClient
           .getManifest(videoId)
           .timeout(const Duration(seconds: 12));
       if (manifest.audioOnly.isNotEmpty) {
-        final mp4Streams = manifest.audioOnly.where(
-          (s) => s.container.name == 'mp4' || s.container.name == 'm4a',
-        );
+        final mp4Streams = manifest.audioOnly
+            .where((s) => s.container.name == 'mp4' || s.container.name == 'm4a')
+            .toList()
+          ..sort((a, b) => b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond));
         final chosen = mp4Streams.isNotEmpty
-            ? mp4Streams.withHighestBitrate()
+            ? (quality == AudioQualityTier.low ? mp4Streams.last : mp4Streams.first)
             : manifest.audioOnly.withHighestBitrate();
         final verified = await _probeStream(
           url: chosen.url.toString(),
@@ -204,7 +237,7 @@ class YtmService {
           userAgent: _androidUa,
         );
         if (verified != null) {
-          return _cacheStream(videoId, verified);
+          return _cacheAudio(cacheKey, verified);
         }
       }
       errors.add('YTExplode: không có luồng khả dụng');
@@ -217,8 +250,108 @@ class YtmService {
     );
   }
 
-  ResolvedAudioStream _cacheStream(String videoId, ResolvedAudioStream stream) {
-    _streamCache[videoId] = _CachedStream(
+  /// Resolves a muxed MP4 video stream (itag=18, H.264 + AAC) for iOS AVPlayer Music Video mode.
+  Future<ResolvedAudioStream> resolveVideoStream(String videoId) async {
+    final cached = _videoCache[videoId];
+    if (cached != null && DateTime.now().isBefore(cached.expiresAt)) {
+      return cached.stream;
+    }
+
+    final clients = [
+      (
+        {
+          'clientName': 'ANDROID',
+          'clientVersion': '20.10.38',
+          'userAgent': _androidUa,
+          'hl': 'en',
+          'osName': 'Android',
+          'osVersion': '11',
+        },
+        _androidUa,
+      ),
+      (
+        {
+          'clientName': 'IOS',
+          'clientVersion': '20.10.4',
+          'deviceMake': 'Apple',
+          'deviceModel': 'iPhone16,2',
+          'userAgent': _iosUa,
+          'hl': 'en',
+          'osName': 'IOS',
+          'osVersion': '18.3.2.22D82',
+        },
+        _iosUa,
+      ),
+    ];
+
+    for (final (clientPayload, ua) in clients) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse(_ytPlayerUrl),
+              headers: {'Content-Type': 'application/json', 'User-Agent': ua},
+              body: jsonEncode({
+                'context': {'client': clientPayload},
+                'videoId': videoId,
+              }),
+            )
+            .timeout(const Duration(seconds: 8));
+        if (res.statusCode != 200) continue;
+
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final formats =
+            (data['streamingData']?['formats'] as List?) ?? const [];
+        final mp4Videos = formats
+            .whereType<Map<String, dynamic>>()
+            .where((f) {
+              final mime = f['mimeType'] as String? ?? '';
+              final url = f['url'] as String?;
+              return mime.startsWith('video/mp4') && url != null && url.isNotEmpty;
+            })
+            .toList()
+          ..sort((a, b) =>
+              ((b['bitrate'] as num?) ?? 0).compareTo((a['bitrate'] as num?) ?? 0));
+
+        for (final fmt in mp4Videos) {
+          final url = fmt['url'] as String;
+          final declaredLen = int.tryParse('${fmt['contentLength'] ?? ''}') ??
+              int.tryParse(Uri.parse(url).queryParameters['clen'] ?? '') ??
+              0;
+          if (declaredLen > 0) {
+            final resolved = ResolvedAudioStream(
+              url: url,
+              contentLength: declaredLen,
+              mimeType: 'video/mp4',
+              userAgent: ua,
+            );
+            _videoCache[videoId] = _CachedStream(
+              resolved,
+              DateTime.now().add(const Duration(minutes: 25)),
+            );
+            return resolved;
+          }
+          final verified = await _probeStream(
+            url: url,
+            declaredLength: declaredLen,
+            mimeType: 'video/mp4',
+            userAgent: ua,
+          );
+          if (verified != null) {
+            _videoCache[videoId] = _CachedStream(
+              verified,
+              DateTime.now().add(const Duration(minutes: 25)),
+            );
+            return verified;
+          }
+        }
+      } catch (_) {}
+    }
+
+    throw Exception('Bài hát này chưa hỗ trợ luồng Video MP4.');
+  }
+
+  ResolvedAudioStream _cacheAudio(String cacheKey, ResolvedAudioStream stream) {
+    _streamCache[cacheKey] = _CachedStream(
       stream,
       DateTime.now().add(const Duration(minutes: 30)),
     );
@@ -229,6 +362,7 @@ class YtmService {
     String videoId, {
     required Map<String, dynamic> clientPayload,
     required String userAgent,
+    required AudioQualityTier quality,
     required List<String> errors,
   }) async {
     final label = clientPayload['clientName'] as String? ?? 'PLAYER';
@@ -279,7 +413,15 @@ class YtmService {
       audioMp4.sort((a, b) =>
           ((b['bitrate'] as num?) ?? 0).compareTo((a['bitrate'] as num?) ?? 0));
 
-      for (final fmt in audioMp4) {
+      final ordered = switch (quality) {
+        AudioQualityTier.low => audioMp4.reversed.toList(),
+        AudioQualityTier.medium => audioMp4.length > 1
+            ? [audioMp4[audioMp4.length ~/ 2], ...audioMp4]
+            : audioMp4,
+        AudioQualityTier.high || AudioQualityTier.auto => audioMp4,
+      };
+
+      for (final fmt in ordered) {
         final url = fmt['url'] as String;
         final declaredLen = int.tryParse('${fmt['contentLength'] ?? ''}') ??
             int.tryParse(Uri.parse(url).queryParameters['clen'] ?? '') ??
@@ -307,7 +449,6 @@ class YtmService {
     return null;
   }
 
-  /// Verifies the CDN stream responds to Range: bytes=0-1 and extracts exact total bytes.
   Future<ResolvedAudioStream?> _probeStream({
     required String url,
     required int declaredLength,
