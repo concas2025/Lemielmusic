@@ -34,7 +34,9 @@ Future<void> main() async {
         androidNotificationChannelName: 'Lemielmusic Playback',
         androidNotificationOngoing: true,
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('JustAudioBackground init failed: $e');
+    }
   }
 
   final ytm = YtmService();
@@ -188,6 +190,54 @@ class _MainShellState extends State<_MainShell> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (widget.controller.errorMessage != null) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: GlassSurface(
+                            borderRadius: 16,
+                            blur: 24,
+                            opacity: 0.24,
+                            tintColor: const Color(0xFFB00020),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline_rounded,
+                                  color: Color(0xFFFF8A80),
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    widget.controller.errorMessage!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: widget.controller.clearError,
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(4),
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      color: Colors.white70,
+                                      size: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       if (currentTrack != null) ...[
                         MiniPlayer(
                           controller: widget.controller,

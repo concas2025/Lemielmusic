@@ -4,9 +4,9 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../models/track.dart';
 
 class _CachedStream {
-  final String url;
+  final ResolvedAudioStream stream;
   final DateTime expiresAt;
-  _CachedStream(this.url, this.expiresAt);
+  _CachedStream(this.stream, this.expiresAt);
 }
 
 class YtmService {
@@ -14,6 +14,13 @@ class YtmService {
       'https://music.youtube.com/youtubei/v1/search?prettyPrint=false';
   static const _ytmNextUrl =
       'https://music.youtube.com/youtubei/v1/next?prettyPrint=false';
+  static const _ytPlayerUrl =
+      'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+
+  static const _androidUa =
+      'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
+  static const _iosUa =
+      'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)';
 
   static const _headers = {
     'Content-Type': 'application/json',
@@ -131,31 +138,219 @@ class YtmService {
     }
   }
 
-  /// Resolves a direct audio stream URL compatible with iOS AVPlayer (MP4/AAC preferred).
-  Future<String> resolveAudioUrl(String videoId) async {
+  /// Resolves a verified audio/mp4 stream (with exact byte length) for iOS AVPlayer.
+  Future<ResolvedAudioStream> resolveAudioStream(String videoId) async {
     final cached = _streamCache[videoId];
     if (cached != null && DateTime.now().isBefore(cached.expiresAt)) {
-      return cached.url;
+      return cached.stream;
     }
 
-    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
-    if (manifest.audioOnly.isEmpty) {
-      throw Exception('Không tìm thấy luồng âm thanh cho bài hát này.');
+    final errors = <String>[];
+
+    // 1. Fast direct InnerTube player API (ANDROID client — avoids video HEAD timeout).
+    final androidStream = await _resolveViaInnertubePlayer(
+      videoId,
+      clientPayload: {
+        'clientName': 'ANDROID',
+        'clientVersion': '20.10.38',
+        'userAgent': _androidUa,
+        'hl': 'en',
+        'osName': 'Android',
+        'osVersion': '11',
+      },
+      userAgent: _androidUa,
+      errors: errors,
+    );
+    if (androidStream != null) {
+      return _cacheStream(videoId, androidStream);
     }
 
-    // iOS AVPlayer natively decodes MP4/M4A (AAC), whereas WebM/Opus fails on iOS.
-    final mp4Streams = manifest.audioOnly
-        .where((s) => s.container.name == 'mp4' || s.container.name == 'm4a');
-    final chosen = mp4Streams.isNotEmpty
-        ? mp4Streams.withHighestBitrate()
-        : manifest.audioOnly.withHighestBitrate();
+    // 2. Direct InnerTube player API (IOS client fallback).
+    final iosStream = await _resolveViaInnertubePlayer(
+      videoId,
+      clientPayload: {
+        'clientName': 'IOS',
+        'clientVersion': '20.10.4',
+        'deviceMake': 'Apple',
+        'deviceModel': 'iPhone16,2',
+        'userAgent': _iosUa,
+        'hl': 'en',
+        'osName': 'IOS',
+        'osVersion': '18.3.2.22D82',
+      },
+      userAgent: _iosUa,
+      errors: errors,
+    );
+    if (iosStream != null) {
+      return _cacheStream(videoId, iosStream);
+    }
 
-    final url = chosen.url.toString();
+    // 3. Fallback to youtube_explode_dart (handles signature-protected tracks).
+    try {
+      final manifest = await _yt.videos.streamsClient
+          .getManifest(videoId)
+          .timeout(const Duration(seconds: 12));
+      if (manifest.audioOnly.isNotEmpty) {
+        final mp4Streams = manifest.audioOnly.where(
+          (s) => s.container.name == 'mp4' || s.container.name == 'm4a',
+        );
+        final chosen = mp4Streams.isNotEmpty
+            ? mp4Streams.withHighestBitrate()
+            : manifest.audioOnly.withHighestBitrate();
+        final verified = await _probeStream(
+          url: chosen.url.toString(),
+          declaredLength: chosen.size.totalBytes,
+          mimeType: chosen.container.name == 'webm' ? 'audio/webm' : 'audio/mp4',
+          userAgent: _androidUa,
+        );
+        if (verified != null) {
+          return _cacheStream(videoId, verified);
+        }
+      }
+      errors.add('YTExplode: không có luồng khả dụng');
+    } catch (e) {
+      errors.add('YTExplode: $e');
+    }
+
+    throw Exception(
+      'Không lấy được luồng âm thanh (${errors.isNotEmpty ? errors.first : "lỗi mạng"})',
+    );
+  }
+
+  ResolvedAudioStream _cacheStream(String videoId, ResolvedAudioStream stream) {
     _streamCache[videoId] = _CachedStream(
-      url,
+      stream,
       DateTime.now().add(const Duration(minutes: 30)),
     );
-    return url;
+    return stream;
+  }
+
+  Future<ResolvedAudioStream?> _resolveViaInnertubePlayer(
+    String videoId, {
+    required Map<String, dynamic> clientPayload,
+    required String userAgent,
+    required List<String> errors,
+  }) async {
+    final label = clientPayload['clientName'] as String? ?? 'PLAYER';
+    try {
+      final res = await http
+          .post(
+            Uri.parse(_ytPlayerUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': userAgent,
+            },
+            body: jsonEncode({
+              'context': {'client': clientPayload},
+              'videoId': videoId,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (res.statusCode != 200) {
+        errors.add('$label HTTP ${res.statusCode}');
+        return null;
+      }
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final status = data['playabilityStatus']?['status'] as String?;
+      if (status != 'OK') {
+        final reason = data['playabilityStatus']?['reason'] as String? ?? status;
+        errors.add('$label: $reason');
+        return null;
+      }
+
+      final adaptive =
+          (data['streamingData']?['adaptiveFormats'] as List?) ?? const [];
+      final audioMp4 = adaptive
+          .whereType<Map<String, dynamic>>()
+          .where((f) {
+            final mime = f['mimeType'] as String? ?? '';
+            final url = f['url'] as String?;
+            return mime.startsWith('audio/mp4') && url != null && url.isNotEmpty;
+          })
+          .toList();
+
+      if (audioMp4.isEmpty) {
+        errors.add('$label: không có luồng audio/mp4');
+        return null;
+      }
+
+      audioMp4.sort((a, b) =>
+          ((b['bitrate'] as num?) ?? 0).compareTo((a['bitrate'] as num?) ?? 0));
+
+      for (final fmt in audioMp4) {
+        final url = fmt['url'] as String;
+        final declaredLen = int.tryParse('${fmt['contentLength'] ?? ''}') ??
+            int.tryParse(Uri.parse(url).queryParameters['clen'] ?? '') ??
+            0;
+        if (declaredLen > 0) {
+          return ResolvedAudioStream(
+            url: url,
+            contentLength: declaredLen,
+            mimeType: 'audio/mp4',
+            userAgent: userAgent,
+          );
+        }
+        final verified = await _probeStream(
+          url: url,
+          declaredLength: declaredLen,
+          mimeType: 'audio/mp4',
+          userAgent: userAgent,
+        );
+        if (verified != null) return verified;
+      }
+      errors.add('$label: CDN không phản hồi Range');
+    } catch (e) {
+      errors.add('$label: $e');
+    }
+    return null;
+  }
+
+  /// Verifies the CDN stream responds to Range: bytes=0-1 and extracts exact total bytes.
+  Future<ResolvedAudioStream?> _probeStream({
+    required String url,
+    required int declaredLength,
+    required String mimeType,
+    required String userAgent,
+  }) async {
+    try {
+      final res = await http.get(
+        Uri.parse(url),
+        headers: {
+          'User-Agent': userAgent,
+          'Range': 'bytes=0-1',
+        },
+      ).timeout(const Duration(seconds: 6));
+
+      if (res.statusCode != 200 && res.statusCode != 206) {
+        return null;
+      }
+
+      int totalBytes = declaredLength;
+      final contentRange = res.headers['content-range'];
+      if (contentRange != null) {
+        final slash = contentRange.lastIndexOf('/');
+        if (slash != -1) {
+          final parsed = int.tryParse(contentRange.substring(slash + 1).trim());
+          if (parsed != null && parsed > 0) totalBytes = parsed;
+        }
+      }
+      if (totalBytes <= 0) {
+        final clenParam = Uri.parse(url).queryParameters['clen'];
+        totalBytes = int.tryParse(clenParam ?? '') ?? 0;
+      }
+      if (totalBytes <= 0) return null;
+
+      return ResolvedAudioStream(
+        url: url,
+        contentLength: totalBytes,
+        mimeType: mimeType,
+        userAgent: userAgent,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   void _collectByKey(

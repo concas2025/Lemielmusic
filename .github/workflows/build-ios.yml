@@ -2,7 +2,6 @@ name: Build Lemielmusic iOS IPA
 
 on:
   push:
-    branches: [main, master]
     tags: ['v*']
   workflow_dispatch:
 

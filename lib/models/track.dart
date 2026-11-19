@@ -80,3 +80,17 @@ class LyricLine {
 
   const LyricLine({this.time, required this.text});
 }
+
+class ResolvedAudioStream {
+  final String url;
+  final int contentLength;
+  final String mimeType;
+  final String userAgent;
+
+  const ResolvedAudioStream({
+    required this.url,
+    required this.contentLength,
+    this.mimeType = 'audio/mp4',
+    required this.userAgent,
+  });
+}

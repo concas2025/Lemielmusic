@@ -4,6 +4,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/track.dart';
+import 'local_audio_proxy.dart';
 import 'storage_service.dart';
 import 'ytm_service.dart';
 
@@ -12,7 +13,8 @@ enum PlayerRepeatMode { off, all, one }
 class PlayerController extends ChangeNotifier {
   final YtmService ytm;
   final StorageService storage;
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player = AudioPlayer(useProxyForRequestHeaders: false);
+  final LocalAudioProxy _proxy = LocalAudioProxy();
 
   List<Track> _queue = [];
   int _currentIndex = -1;
@@ -90,6 +92,21 @@ class PlayerController extends ChangeNotifier {
       }
     }));
 
+    _subs.add(_player.errorStream.listen((err) {
+      _isLoadingStream = false;
+      _isBuffering = false;
+      _isPlaying = false;
+      final detail = err.message ?? 'Mã lỗi ${err.code}';
+      _errorMessage = 'Lỗi trình phát: $detail';
+      notifyListeners();
+    }));
+
+    notifyListeners();
+  }
+
+  void clearError() {
+    if (_errorMessage == null) return;
+    _errorMessage = null;
     notifyListeners();
   }
 
@@ -147,11 +164,14 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final url = await ytm.resolveAudioUrl(track.id);
+      final resolved = await ytm.resolveAudioStream(track.id);
+      if (seq != _playSeq) return;
+
+      final playUri = await _proxy.registerStream(track.id, resolved);
       if (seq != _playSeq) return;
 
       final source = AudioSource.uri(
-        Uri.parse(url),
+        playUri,
         tag: track.toMediaItem(),
       );
       await _player.setAudioSource(source);
@@ -169,7 +189,9 @@ class PlayerController extends ChangeNotifier {
       if (seq != _playSeq) return;
       _isLoadingStream = false;
       _isPlaying = false;
-      _errorMessage = 'Không thể phát "${track.title}". Thử lại hoặc chọn bài khác.';
+      final raw = e.toString().replaceFirst('Exception: ', '');
+      final detail = raw.length > 140 ? '${raw.substring(0, 140)}...' : raw;
+      _errorMessage = 'Không thể phát "${track.title}": $detail';
       notifyListeners();
     }
   }
@@ -318,6 +340,7 @@ class PlayerController extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
+    unawaited(_proxy.dispose());
     _player.dispose();
     super.dispose();
   }
