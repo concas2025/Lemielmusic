@@ -9,6 +9,7 @@ import 'package:lemielmusic/screens/audio_lab_screen.dart';
 import 'package:lemielmusic/screens/customisation_screen.dart';
 import 'package:lemielmusic/screens/library_screen.dart';
 import 'package:lemielmusic/screens/lyrics_share_screen.dart';
+import 'package:lemielmusic/screens/profile_screen.dart';
 import 'package:lemielmusic/services/import_service.dart';
 import 'package:lemielmusic/services/local_audio_proxy.dart';
 import 'package:lemielmusic/services/lyrics_service.dart';
@@ -396,6 +397,25 @@ void main() {
     );
     await tester.pump();
     expect(find.text('Nhập Playlist từ nền tảng khác'), findsOneWidget);
+
+    // 4. ProfileScreen renders Developer Card & social links
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.black,
+          body: ProfileScreen(
+            controller: playerCtrl,
+            settingsController: settingsCtrl,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+    await tester.pump();
+    expect(find.text('Facebook'), findsOneWidget);
+    expect(find.text('Instagram'), findsOneWidget);
+    expect(find.text('GitHub'), findsOneWidget);
     ytm.dispose();
   });
 }

@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/player_controller.dart';
 import '../services/settings_controller.dart';
 import '../widgets/glass.dart';
@@ -63,6 +65,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _openSocialUrl(String url, String label) async {
+    final uri = Uri.parse(url);
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (launched) return;
+    } catch (_) {}
+
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đã sao chép liên kết $label'),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -327,6 +351,125 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
 
+        // Mochy-style About & Developer Social Card
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: GlassSurface(
+              borderRadius: 24,
+              blur: 20,
+              opacity: 0.11,
+              highQuality: settings.highGlass,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.asset(
+                          'assets/logo.png',
+                          width: 52,
+                          height: 52,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => Container(
+                            width: 52,
+                            height: 52,
+                            color: accent.withValues(alpha: 0.25),
+                            child: const Icon(
+                              Icons.music_note_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Text(
+                                  'Lemielmusic',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                  ),
+                                ),
+                                SizedBox(width: 7),
+                                Text(
+                                  'v2.0.1',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Phát triển bởi @concas2025 • Made with <3',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.62),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SocialButton(
+                          label: 'Facebook',
+                          icon: Icons.facebook_rounded,
+                          color: const Color(0xFF1877F2),
+                          onTap: () => _openSocialUrl(
+                            'https://www.facebook.com/dnqdwthgv/',
+                            'Facebook',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _SocialButton(
+                          label: 'Instagram',
+                          icon: Icons.camera_alt_rounded,
+                          color: const Color(0xFFE1306C),
+                          onTap: () => _openSocialUrl(
+                            'https://www.instagram.com/s1mpleirl.das/',
+                            'Instagram',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _SocialButton(
+                          label: 'GitHub',
+                          icon: Icons.code_rounded,
+                          color: const Color(0xFF8B949E),
+                          onTap: () => _openSocialUrl(
+                            'https://github.com/concas2025',
+                            'GitHub',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+
         const SliverToBoxAdapter(child: SizedBox(height: 170)),
       ],
     );
@@ -446,6 +589,57 @@ class _ActionCard extends StatelessWidget {
             Icon(
               Icons.chevron_right_rounded,
               color: Colors.white.withValues(alpha: 0.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SocialButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _SocialButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SpringTap(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: color.withValues(alpha: 0.16),
+          border: Border.all(
+            color: color.withValues(alpha: 0.42),
+            width: 0.9,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: Colors.white),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         ),
