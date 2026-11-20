@@ -448,7 +448,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                                 SizedBox(width: 7),
                                 Text(
-                                  'v2.1.0',
+                                  'v2.1.1',
                                   style: TextStyle(
                                     color: Colors.white54,
                                     fontSize: 11.5,
