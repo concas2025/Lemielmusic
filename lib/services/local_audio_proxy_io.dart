@@ -255,7 +255,13 @@ class LocalAudioProxy {
         if (result.bytes != null &&
             result.bytes!.length == expectedLen &&
             !buffer.closed) {
-          await buffer.writeChunk(chunkIndex, result.bytes!);
+          final bytes = result.bytes!;
+          if (chunkIndex == 0 && stream.mimeType.startsWith('audio/mp4')) {
+            if (normalizeFragmentedMp4Header(bytes)) {
+              debugPrint('[LemielAudio] Normalized fMP4 moov duration for $id');
+            }
+          }
+          await buffer.writeChunk(chunkIndex, bytes);
           return true;
         }
 
@@ -359,6 +365,7 @@ class LocalAudioProxy {
               contentLength: stream.contentLength,
               mimeType: stream.mimeType,
               userAgent: stream.userAgent,
+              duration: stream.duration,
             );
           }
           return (bytes: bytes, statusCode: res.statusCode);
@@ -533,6 +540,9 @@ class LocalAudioProxy {
           headersSent = true;
         }
         if (!clientClosed) {
+          if (cursor == 0 && activeStream.mimeType.startsWith('audio/mp4')) {
+            normalizeFragmentedMp4Header(bytes);
+          }
           request.response.add(bytes);
           await request.response.flush();
         }
@@ -570,6 +580,117 @@ class LocalAudioProxy {
       }
     }
     return list;
+  }
+
+  /// YouTube DASH fMP4 (`itag=140`) writes the full track duration into `moov`
+  /// (`mvhd`/`tkhd`/`mdhd`) AND includes `mvex` + `moof` fragments for the same
+  /// duration, causing iOS AVPlayer to sum both and report 2x duration.
+  /// Per ISO/IEC 14496-12, zeroing those 3 header duration fields in-place when
+  /// `mvex` is present fixes AVPlayer + Lock Screen duration with zero byte shift.
+  static bool normalizeFragmentedMp4Header(Uint8List bytes) {
+    final len = bytes.length;
+    if (len < 32) return false;
+    final data = ByteData.sublistView(bytes);
+
+    int pos = 0;
+    while (pos + 8 <= len) {
+      final box = _readBox(data, pos, len);
+      if (box == null) break;
+      if (box.type == 0x6D6F6F76 /* 'moov' */) {
+        if (!_containsChildBox(data, box.contentStart, box.end, 0x6D766578 /* 'mvex' */)) {
+          return false;
+        }
+        return _zeroMoovDurations(bytes, data, box.contentStart, box.end);
+      }
+      pos = box.end;
+    }
+    return false;
+  }
+
+  static ({int type, int contentStart, int end})? _readBox(
+    ByteData data,
+    int pos,
+    int limit,
+  ) {
+    if (pos + 8 > limit) return null;
+    int size = data.getUint32(pos);
+    final type = data.getUint32(pos + 4);
+    int headerLen = 8;
+    if (size == 1) {
+      if (pos + 16 > limit) return null;
+      size = data.getUint64(pos + 8);
+      headerLen = 16;
+    } else if (size == 0) {
+      size = limit - pos;
+    }
+    if (size < headerLen || pos + size > limit) return null;
+    return (type: type, contentStart: pos + headerLen, end: pos + size);
+  }
+
+  static bool _containsChildBox(
+    ByteData data,
+    int start,
+    int end,
+    int targetType,
+  ) {
+    int pos = start;
+    while (pos + 8 <= end) {
+      final box = _readBox(data, pos, end);
+      if (box == null) break;
+      if (box.type == targetType) return true;
+      pos = box.end;
+    }
+    return false;
+  }
+
+  static bool _zeroMoovDurations(
+    Uint8List bytes,
+    ByteData data,
+    int start,
+    int end,
+  ) {
+    bool patched = false;
+    int pos = start;
+    while (pos + 8 <= end) {
+      final box = _readBox(data, pos, end);
+      if (box == null) break;
+      final t = box.type;
+      if (t == 0x7472616B /* 'trak' */ || t == 0x6D646961 /* 'mdia' */) {
+        if (_zeroMoovDurations(bytes, data, box.contentStart, box.end)) {
+          patched = true;
+        }
+      } else if (t == 0x6D766864 /* 'mvhd' */ || t == 0x6D646864 /* 'mdhd' */) {
+        if (box.contentStart >= box.end) {
+          pos = box.end;
+          continue;
+        }
+        final ver = bytes[box.contentStart];
+        final durOff = box.contentStart + (ver == 1 ? 24 : 16);
+        final durLen = ver == 1 ? 8 : 4;
+        if (durOff + durLen <= box.end) {
+          for (int i = 0; i < durLen; i++) {
+            bytes[durOff + i] = 0;
+          }
+          patched = true;
+        }
+      } else if (t == 0x746B6864 /* 'tkhd' */) {
+        if (box.contentStart >= box.end) {
+          pos = box.end;
+          continue;
+        }
+        final ver = bytes[box.contentStart];
+        final durOff = box.contentStart + (ver == 1 ? 28 : 20);
+        final durLen = ver == 1 ? 8 : 4;
+        if (durOff + durLen <= box.end) {
+          for (int i = 0; i < durLen; i++) {
+            bytes[durOff + i] = 0;
+          }
+          patched = true;
+        }
+      }
+      pos = box.end;
+    }
+    return patched;
   }
 
   bool isFullyCached(String id) {

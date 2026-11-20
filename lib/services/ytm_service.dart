@@ -448,6 +448,11 @@ class YtmService {
         if (res.statusCode != 200) continue;
 
         final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final detailsLenSec =
+            int.tryParse('${data['videoDetails']?['lengthSeconds'] ?? ''}');
+        final detailsDur = (detailsLenSec != null && detailsLenSec > 0)
+            ? Duration(seconds: detailsLenSec)
+            : null;
         final formats =
             (data['streamingData']?['formats'] as List?) ?? const [];
         final mp4Videos = formats
@@ -466,12 +471,17 @@ class YtmService {
           final declaredLen = int.tryParse('${fmt['contentLength'] ?? ''}') ??
               int.tryParse(Uri.parse(url).queryParameters['clen'] ?? '') ??
               0;
+          final approxMs = int.tryParse('${fmt['approxDurationMs'] ?? ''}');
+          final fmtDur = (approxMs != null && approxMs > 0)
+              ? Duration(milliseconds: approxMs)
+              : detailsDur;
           final verified = await _probeStream(
             url: url,
             declaredLength: declaredLen,
             mimeType: 'video/mp4',
             userAgent: ua,
             verifyPast1MiB: true,
+            duration: fmtDur,
           );
           if (verified != null) return verified;
         }
@@ -558,17 +568,28 @@ class YtmService {
         AudioQualityTier.high || AudioQualityTier.auto => audioMp4,
       };
 
+      final detailsLenSec =
+          int.tryParse('${data['videoDetails']?['lengthSeconds'] ?? ''}');
+      final detailsDur = (detailsLenSec != null && detailsLenSec > 0)
+          ? Duration(seconds: detailsLenSec)
+          : null;
+
       for (final fmt in ordered) {
         final url = fmt['url'] as String;
         final declaredLen = int.tryParse('${fmt['contentLength'] ?? ''}') ??
             int.tryParse(Uri.parse(url).queryParameters['clen'] ?? '') ??
             0;
+        final approxMs = int.tryParse('${fmt['approxDurationMs'] ?? ''}');
+        final fmtDur = (approxMs != null && approxMs > 0)
+            ? Duration(milliseconds: approxMs)
+            : detailsDur;
         final verified = await _probeStream(
           url: url,
           declaredLength: declaredLen,
           mimeType: 'audio/mp4',
           userAgent: userAgent,
           verifyPast1MiB: verifyPast1MiB,
+          duration: fmtDur,
         );
         if (verified != null) return verified;
       }
@@ -587,6 +608,7 @@ class YtmService {
     required String mimeType,
     required String userAgent,
     required bool verifyPast1MiB,
+    Duration? duration,
   }) async {
     try {
       int totalBytes = declaredLength;
@@ -650,6 +672,7 @@ class YtmService {
         contentLength: totalBytes,
         mimeType: mimeType,
         userAgent: userAgent,
+        duration: duration,
       );
     } catch (_) {
       return null;
