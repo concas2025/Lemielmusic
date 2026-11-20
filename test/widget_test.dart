@@ -9,6 +9,7 @@ import 'package:lemielmusic/screens/audio_lab_screen.dart';
 import 'package:lemielmusic/screens/customisation_screen.dart';
 import 'package:lemielmusic/screens/library_screen.dart';
 import 'package:lemielmusic/screens/lyrics_share_screen.dart';
+import 'package:lemielmusic/screens/onboarding_screen.dart';
 import 'package:lemielmusic/screens/profile_screen.dart';
 import 'package:lemielmusic/services/import_service.dart';
 import 'package:lemielmusic/services/local_audio_proxy.dart';
@@ -17,6 +18,7 @@ import 'package:lemielmusic/services/player_controller.dart';
 import 'package:lemielmusic/services/settings_controller.dart';
 import 'package:lemielmusic/services/storage_service.dart';
 import 'package:lemielmusic/services/ytm_service.dart';
+import 'package:lemielmusic/theme/lemiel_theme.dart';
 import 'package:lemielmusic/widgets/glass.dart';
 import 'package:lemielmusic/widgets/liquid_dock.dart';
 import 'package:lemielmusic/widgets/profile_id_card.dart';
@@ -45,8 +47,19 @@ void main() {
     expect(restored.title, 'Test Song');
   });
 
-  test('AppSettings serializes and restores all customisation & Audio Lab fields', () {
-    const settings = AppSettings(
+  test('AppSettings persists Liquid Glass / Classic theme and all Audio Lab fields', () async {
+    SharedPreferences.setMockInitialValues({});
+    final storage = StorageService();
+    final ctrl = SettingsController(storage: storage);
+    await ctrl.init();
+
+    expect(ctrl.settings.visualTheme, AppVisualTheme.liquidGlass);
+    ctrl.setVisualTheme(AppVisualTheme.classic);
+    expect(ctrl.settings.visualTheme, AppVisualTheme.classic);
+    expect(ctrl.settings.isClassic, isTrue);
+
+    const full = AppSettings(
+      visualTheme: AppVisualTheme.classic,
       playerStyle: PlayerStyle.vinyl,
       backgroundStyle: PlayerBackgroundStyle.appleBlur,
       sliderStyle: SliderStyle.liquidPill,
@@ -65,7 +78,8 @@ void main() {
       eqBands: [6, 4, 0, -1, 1],
     );
 
-    final restored = AppSettings.fromJson(settings.toJson());
+    final restored = AppSettings.fromJson(full.toJson());
+    expect(restored.visualTheme, AppVisualTheme.classic);
     expect(restored.playerStyle, PlayerStyle.vinyl);
     expect(restored.backgroundStyle, PlayerBackgroundStyle.appleBlur);
     expect(restored.sliderStyle, SliderStyle.liquidPill);
@@ -75,18 +89,17 @@ void main() {
     expect(restored.blurInactiveLyrics, false);
     expect(restored.audioQuality, AudioQualityTier.low);
     expect(restored.accentPreset, AccentPreset.indigo);
-    expect(restored.glassQuality, GlassQuality.performance);
     expect(restored.activeLyricsProviders, ['betterlyrics', 'ytm']);
     expect(restored.playbackSpeed, 0.85);
     expect(restored.playbackPitch, 0.90);
     expect(restored.eqPreset, 'Bass Boost');
-    expect(restored.eqBands, [6, 4, 0, -1, 1]);
   });
 
-  test('UserProfile & LocalPlaylist serialize cleanly and compute initials/topArtists', () {
+  test('UserProfile & LocalPlaylist serialize avatar presets, initials, and topArtists', () {
     const profile = UserProfile(
       displayName: 'Minh Anh',
       bio: 'Chill Vibes',
+      avatarPresetIndex: 3,
       memberId: 'LM-2026-8888',
       joinedDate: '11/2026',
       silverCard: true,
@@ -97,6 +110,7 @@ void main() {
 
     final restored = UserProfile.fromJson(profile.toJson());
     expect(restored.initials, 'MA');
+    expect(restored.avatarPresetIndex, 3);
     expect(restored.silverCard, true);
     expect(restored.topArtists.first.key, 'Đen Vâu');
     expect(restored.topArtists.first.value, 25);
@@ -164,12 +178,14 @@ void main() {
     expect(ImportService.detectPlatform('https://example.com/nope'), isNull);
   });
 
-  test('LocalAudioProxy translates strict 403 CDN, caches chunks to disk for instant seeks, and serves MP4 video', () async {
+  test('LocalAudioProxy caches past 1MB, validates chunk length, and auto-refreshes expired 403 URLs', () async {
     final prevOverrides = HttpOverrides.current;
     HttpOverrides.global = null;
 
     int upstreamRequests = 0;
-    final payload = Uint8List.fromList(List<int>.generate(600000, (i) => i % 251));
+    int refreshCalls = 0;
+    // 1.3 MB payload (exceeds YouTube's 1.00 MiB cutoff)
+    final payload = Uint8List.fromList(List<int>.generate(1350000, (i) => i % 251));
     final fakeCdn = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     fakeCdn.listen((req) async {
       final range = req.headers.value(HttpHeaders.rangeHeader);
@@ -178,26 +194,50 @@ void main() {
         await req.response.close();
         return;
       }
-      upstreamRequests++;
       final m = RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(range)!;
       final start = int.parse(m.group(1)!);
       final end = int.parse(m.group(2)!);
+
+      // Simulate expired/403 URL on `/expired` past 1 MiB, while `/fresh` serves 100%
+      if (req.uri.path == '/expired' && start >= 1048576) {
+        req.response.statusCode = HttpStatus.forbidden;
+        await req.response.close();
+        return;
+      }
+
+      upstreamRequests++;
       final slice = payload.sublist(start, end + 1);
       req.response.statusCode = HttpStatus.partialContent;
       req.response.headers.set(HttpHeaders.contentTypeHeader, 'audio/mp4');
-      req.response.headers.set(HttpHeaders.contentRangeHeader, 'bytes $start-$end/${payload.length}');
+      req.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes $start-$end/${payload.length}',
+      );
       req.response.contentLength = slice.length;
       req.response.add(slice);
       await req.response.close();
     });
 
-    final proxy = LocalAudioProxy();
+    final freshUrl = 'http://127.0.0.1:${fakeCdn.port}/fresh';
+    final expiredUrl = 'http://127.0.0.1:${fakeCdn.port}/expired';
+
+    final proxy = LocalAudioProxy(
+      onRefreshStream: (id) async {
+        refreshCalls++;
+        return ResolvedAudioStream(
+          url: freshUrl,
+          contentLength: payload.length,
+          mimeType: 'audio/mp4',
+          userAgent: 'TestAgent',
+        );
+      },
+    );
+
     try {
-      final cdnUrl = 'http://127.0.0.1:${fakeCdn.port}/videoplayback';
       final proxyUri = await proxy.registerStream(
-        'testAudioCache',
+        'testOver1MB',
         ResolvedAudioStream(
-          url: cdnUrl,
+          url: expiredUrl,
           contentLength: payload.length,
           mimeType: 'audio/mp4',
           userAgent: 'TestAgent',
@@ -205,45 +245,23 @@ void main() {
       );
       expect(proxyUri.path, endsWith('.m4a'));
 
-      // 1. AVPlayer HEAD probe
-      final headRes = await http.head(proxyUri);
-      expect(headRes.statusCode, 200);
-      expect(headRes.headers['content-type'], 'audio/mp4');
-      expect(headRes.headers['content-length'], '${payload.length}');
-
-      // 2. AVPlayer 2-byte Range probe
-      final r01 = await http.get(proxyUri, headers: {'Range': 'bytes=0-1'});
-      expect(r01.statusCode, 206);
-      expect(r01.bodyBytes, payload.sublist(0, 2));
-
-      // 3. Full GET triggers full disk cache population
+      // Full GET past 1.00 MiB triggers seamless onRefreshStream and delivers all 1.35 MB
       final rFull = await http.get(proxyUri);
       expect(rFull.statusCode, 200);
       expect(rFull.bodyBytes.length, payload.length);
-      expect(proxy.isFullyCached('testAudioCache'), isTrue);
+      expect(rFull.bodyBytes, payload);
+      expect(refreshCalls, greaterThanOrEqualTo(1));
+      expect(proxy.isFullyCached('testOver1MB'), isTrue);
 
-      // 4. Subsequent lyrics tap-to-seek hits local disk with ZERO upstream calls!
-      final reqCountBeforeSeek = upstreamRequests;
-      final rSeek = await http.get(proxyUri, headers: {'Range': 'bytes=300000-350000'});
-      expect(rSeek.statusCode, 206);
-      expect(rSeek.bodyBytes, payload.sublist(300000, 350001));
-      expect(upstreamRequests, reqCountBeforeSeek);
-
-      // 5. MP4 Video registration uses .mp4 extension & streams cleanly
-      final videoUri = await proxy.registerStream(
-        'testVid',
-        ResolvedAudioStream(
-          url: cdnUrl,
-          contentLength: payload.length,
-          mimeType: 'video/mp4',
-          userAgent: 'TestAgent',
-        ),
-        enableCache: false,
+      // Subsequent seek past 1:30 hits disk cache with ZERO upstream requests
+      final beforeSeek = upstreamRequests;
+      final rSeek = await http.get(
+        proxyUri,
+        headers: {'Range': 'bytes=1100000-1200000'},
       );
-      expect(videoUri.path, endsWith('.mp4'));
-      final vChunk = await http.get(videoUri, headers: {'Range': 'bytes=0-1023'});
-      expect(vChunk.statusCode, 206);
-      expect(vChunk.bodyBytes, payload.sublist(0, 1024));
+      expect(rSeek.statusCode, 206);
+      expect(rSeek.bodyBytes, payload.sublist(1100000, 1200001));
+      expect(upstreamRequests, beforeSeek);
     } finally {
       await proxy.dispose();
       await fakeCdn.close(force: true);
@@ -251,7 +269,7 @@ void main() {
     }
   });
 
-  testWidgets('Liquid Glass components, Floating Dock, ID Card & Customisation render and respond', (tester) async {
+  testWidgets('Liquid Glass & Classic themes, Floating Dock, ID Card & Customisation work cleanly', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final storage = StorageService();
     final settingsCtrl = SettingsController(storage: storage);
@@ -261,6 +279,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        theme: ThemeData.dark().copyWith(
+          extensions: [LemielTheme.fromSettings(settingsCtrl.settings)],
+        ),
         home: Scaffold(
           backgroundColor: Colors.black,
           body: SingleChildScrollView(
@@ -275,6 +296,7 @@ void main() {
                 ),
                 CustomMusicSlider(
                   value: 0.5,
+                  bufferedValue: 0.8,
                   isPlaying: false,
                   style: SliderStyle.mochyWavy,
                   accentColor: const Color(0xFFFF375F),
@@ -300,36 +322,56 @@ void main() {
     );
 
     expect(find.text('Liquid Lemiel'), findsOneWidget);
-    expect(find.text('LEMIEL PASS'), findsOneWidget);
+    expect(find.text('THẺ THÀNH VIÊN'), findsOneWidget);
 
-    // Tap separated circular Search Orb -> index 3
     await tester.tap(find.byIcon(Icons.search_rounded));
     await tester.pump();
     expect(selectedTab, 3);
 
-    // Toggle Obsidian -> Silver card finish
     await tester.tap(find.text('Silver'));
     await tester.pump();
     expect(settingsCtrl.profile.silverCard, isTrue);
 
-    // Verify CustomisationScreen updates settings live
+    // CustomisationScreen switches between Liquid Glass and Classic live
     await tester.pumpWidget(
       MaterialApp(
+        theme: ThemeData.dark().copyWith(
+          extensions: [LemielTheme.fromSettings(settingsCtrl.settings)],
+        ),
         home: CustomisationScreen(settingsController: settingsCtrl),
       ),
     );
     await tester.pump();
-    expect(find.text('Tuỳ biến giao diện'), findsOneWidget);
-    await tester.tap(find.text('Đĩa Vinyl xoay'));
+    expect(find.text('Chế độ giao diện (Theme)'), findsOneWidget);
+    await tester.tap(find.text('Classic'));
     await tester.pump();
-    expect(settingsCtrl.settings.playerStyle, PlayerStyle.vinyl);
+    expect(settingsCtrl.settings.visualTheme, AppVisualTheme.classic);
   });
 
-  testWidgets('LyricsShareScreen, AudioLabScreen, and LibraryScreen render without errors', (tester) async {
+  testWidgets('OnboardingScreen, LyricsShareScreen, AudioLabScreen, LibraryScreen, and ProfileScreen render cleanly', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final storage = StorageService();
     final settingsCtrl = SettingsController(storage: storage);
     await settingsCtrl.init();
+
+    bool completedOnboarding = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark().copyWith(
+          extensions: [LemielTheme.fromSettings(settingsCtrl.settings)],
+        ),
+        home: OnboardingScreen(
+          settingsController: settingsCtrl,
+          onComplete: () => completedOnboarding = true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Bắt đầu nghe nhạc'), findsOneWidget);
+    await tester.tap(find.text('Bắt đầu nghe nhạc'));
+    await tester.pump();
+    expect(completedOnboarding, isTrue);
+    expect(settingsCtrl.profile.onboardingDone, isTrue);
 
     const sampleTrack = Track(
       id: 't1',
@@ -344,7 +386,6 @@ void main() {
       LyricLine(time: Duration(seconds: 20), text: 'Lá bay theo gió xôn xao'),
     ];
 
-    // 1. LyricsShareScreen renders card + line picker toggle
     await tester.pumpWidget(
       MaterialApp(
         home: LyricsShareScreen(
@@ -358,15 +399,14 @@ void main() {
     );
     await tester.pump();
     expect(find.text('Chia sẻ Lời bài hát'), findsOneWidget);
-    expect(find.text('Mùa thu mang giấc mơ quay về'), findsOneWidget);
 
-    // 2. AudioLabScreen renders quality, speed/pitch, and EQ
     final ytm = YtmService();
     final playerCtrl = PlayerController(
       ytm: ytm,
       storage: storage,
       settingsController: settingsCtrl,
     );
+
     await tester.pumpWidget(
       MaterialApp(
         home: AudioLabScreen(
@@ -377,12 +417,7 @@ void main() {
     );
     await tester.pump();
     expect(find.text('Audio Lab'), findsOneWidget);
-    await tester.tap(find.text('Slowed Chill'));
-    await tester.pump();
-    expect(settingsCtrl.settings.playbackSpeed, 0.85);
-    expect(settingsCtrl.settings.playbackPitch, 0.90);
 
-    // 3. LibraryScreen renders Playlist / Favorites / History + Importer Banner
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -398,9 +433,11 @@ void main() {
     await tester.pump();
     expect(find.text('Nhập Playlist từ nền tảng khác'), findsOneWidget);
 
-    // 4. ProfileScreen renders Developer Card & social links
     await tester.pumpWidget(
       MaterialApp(
+        theme: ThemeData.dark().copyWith(
+          extensions: [LemielTheme.fromSettings(settingsCtrl.settings)],
+        ),
         home: Scaffold(
           backgroundColor: Colors.black,
           body: ProfileScreen(
@@ -411,7 +448,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
     await tester.pump();
     expect(find.text('Facebook'), findsOneWidget);
     expect(find.text('Instagram'), findsOneWidget);

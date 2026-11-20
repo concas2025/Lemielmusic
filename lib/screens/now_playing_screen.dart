@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:video_player/video_player.dart';
 import '../models/app_settings.dart';
@@ -8,6 +10,7 @@ import '../models/track.dart';
 import '../services/lyrics_service.dart';
 import '../services/player_controller.dart';
 import '../services/settings_controller.dart';
+import '../theme/lemiel_theme.dart';
 import '../widgets/glass.dart';
 import '../widgets/wavy_slider.dart';
 import 'audio_lab_screen.dart';
@@ -41,10 +44,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
   String? _lyricsTrackId;
   bool _loadingLyrics = false;
   LyricsResult _lyricsResult = LyricsResult.empty;
+  List<GlobalKey> _lyricKeys = const [];
   int _lastActiveLyricIndex = -1;
+  bool _userScrollingLyrics = false;
+  Timer? _resumeAutoScrollTimer;
   final ScrollController _lyricsScroll = ScrollController();
 
   double? _dragSeekFraction;
+  double _dismissDragOffset = 0.0;
   late final AnimationController _vinylCtrl;
 
   @override
@@ -66,6 +73,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
   void dispose() {
     widget.controller.removeListener(_onPlayerUpdate);
     widget.settingsController.removeListener(_onSettingsUpdate);
+    _resumeAutoScrollTimer?.cancel();
     _vinylCtrl.dispose();
     _lyricsScroll.dispose();
     _disposeVideo(resumeAudio: false);
@@ -101,9 +109,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
 
     _lyricsTrackId = track.id;
     _lastActiveLyricIndex = -1;
+    _userScrollingLyrics = false;
+    _resumeAutoScrollTimer?.cancel();
     setState(() {
       _loadingLyrics = true;
       _lyricsResult = LyricsResult.empty;
+      _lyricKeys = const [];
     });
 
     final providers = widget.settingsController.settings.activeLyricsProviders;
@@ -115,8 +126,59 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     if (!mounted || _lyricsTrackId != track.id) return;
     setState(() {
       _lyricsResult = result;
+      _lyricKeys = List<GlobalKey>.generate(
+        result.lines.length,
+        (_) => GlobalKey(),
+      );
       _loadingLyrics = false;
     });
+  }
+
+  void _scrollToLyricIndex(int index, {bool force = false}) {
+    if (index < 0 || index >= _lyricKeys.length) return;
+    if (_userScrollingLyrics && !force) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || index >= _lyricKeys.length) return;
+      final ctx = _lyricKeys[index].currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.36,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  void _onUserScrollLyrics() {
+    if (!_userScrollingLyrics) {
+      setState(() => _userScrollingLyrics = true);
+    }
+    _resumeAutoScrollTimer?.cancel();
+    _resumeAutoScrollTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() => _userScrollingLyrics = false);
+      if (_lastActiveLyricIndex >= 0) {
+        _scrollToLyricIndex(_lastActiveLyricIndex, force: true);
+      }
+    });
+  }
+
+  /// Finds the currently active lyric line accurately even when timestamps are
+  /// partial (some lines have null timestamps) or slightly out of order.
+  static int computeActiveLyricIndex(List<LyricLine> lines, Duration position) {
+    int active = -1;
+    Duration bestTime = Duration.zero;
+    for (int i = 0; i < lines.length; i++) {
+      final t = lines[i].time;
+      if (t != null && position >= t) {
+        if (active == -1 || t >= bestTime) {
+          active = i;
+          bestTime = t;
+        }
+      }
+    }
+    return active;
   }
 
   Future<void> _toggleVideoMode(bool enableVideo) async {
@@ -201,334 +263,384 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     return '$m:$s';
   }
 
+  void _closePlayer() {
+    _disposeVideo(resumeAudio: _videoMode);
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final track = widget.controller.currentTrack;
+    final theme = LemielTheme.of(context);
     if (track == null) {
-      return const Scaffold(backgroundColor: Color(0xFF06060A));
+      return Scaffold(backgroundColor: theme.canvas);
     }
 
     final settings = widget.settingsController.settings;
     final accent = settings.accentColor;
     final isFav = widget.controller.isFavorite(track.id);
+    final dragFraction = (_dismissDragOffset / 320.0).clamp(0.0, 1.0);
+    final dragScale = 1.0 - dragFraction * 0.06;
+    final dragRadius = dragFraction * 28.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF06060A),
+      backgroundColor: Colors.transparent,
       body: GestureDetector(
-        onVerticalDragEnd: (details) {
-          if ((details.primaryVelocity ?? 0) > 460) {
-            _disposeVideo(resumeAudio: _videoMode);
-            Navigator.of(context).pop();
-          }
-        },
-        child: AmbientBackground(
-          artworkUrl: track.artworkUrl,
-          accentColor: accent,
-          style: settings.backgroundStyle,
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22),
-              child: Column(
-                children: [
-                  const SizedBox(height: 6),
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.30),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Top header: Down button | Song / Video Toggle | Quick Customise + Queue
-                  Row(
+        onVerticalDragUpdate: _showLyrics
+            ? null
+            : (details) {
+                if (details.delta.dy > 0 || _dismissDragOffset > 0) {
+                  setState(() {
+                    _dismissDragOffset =
+                        (_dismissDragOffset + details.delta.dy).clamp(0.0, 340.0);
+                  });
+                }
+              },
+        onVerticalDragEnd: _showLyrics
+            ? null
+            : (details) {
+                final vel = details.primaryVelocity ?? 0;
+                if (vel > 420 || _dismissDragOffset > 130) {
+                  _closePlayer();
+                } else {
+                  setState(() => _dismissDragOffset = 0.0);
+                }
+              },
+        child: AnimatedContainer(
+          duration: _dismissDragOffset == 0
+              ? const Duration(milliseconds: 220)
+              : Duration.zero,
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(0, _dismissDragOffset, 0)
+            ..scaleByDouble(dragScale, dragScale, 1.0, 1.0),
+          transformAlignment: Alignment.topCenter,
+          child: ClipRRect(
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(dragRadius),
+            ),
+            child: AmbientBackground(
+              artworkUrl: track.artworkUrl,
+              accentColor: accent,
+              style: settings.backgroundStyle,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 22),
+                  child: Column(
                     children: [
-                      IconButton(
-                        onPressed: () {
-                          _disposeVideo(resumeAudio: _videoMode);
-                          Navigator.of(context).pop();
-                        },
-                        icon: const Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          color: Colors.white70,
-                          size: 30,
+                      const SizedBox(height: 6),
+                      Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.30),
+                          borderRadius: BorderRadius.circular(4),
                         ),
                       ),
-                      const Spacer(),
-                      // YouTube Music style Bài hát | Video pill
-                      GlassSurface(
-                        borderRadius: 20,
-                        blur: 16,
-                        opacity: 0.12,
-                        highQuality: settings.highGlass,
-                        padding: const EdgeInsets.all(3),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _ModeTab(
-                              label: 'Bài hát',
-                              active: !_videoMode,
-                              accent: accent,
-                              onTap: () => _toggleVideoMode(false),
+                      const SizedBox(height: 10),
+
+                      // Top header: Down button | Song / Video Toggle | Quick Customise
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: _closePlayer,
+                            icon: const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Colors.white70,
+                              size: 30,
                             ),
-                            _ModeTab(
-                              label: 'Video',
-                              active: _videoMode,
-                              accent: accent,
-                              onTap: () => _toggleVideoMode(true),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        tooltip: 'Tuỳ chỉnh trực tiếp',
-                        onPressed: () => _openQuickCustomiseSheet(context),
-                        icon: Icon(
-                          Icons.tune_rounded,
-                          color: Colors.white.withValues(alpha: 0.84),
-                          size: 23,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // Center Stage: Video Player OR Lyrics OR Artwork (3 Styles)
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 320),
-                      switchInCurve: Curves.easeOutCubic,
-                      child: _videoMode
-                          ? _buildVideoView(accent)
-                          : _showLyrics
-                              ? _buildLyricsView(track, settings, accent)
-                              : _buildArtworkView(track, settings, accent),
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Title, Artist, Favorite & Share Lyrics shortcut
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              track.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 21,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Row(
+                          ),
+                          const Spacer(),
+                          GlassSurface(
+                            borderRadius: 20,
+                            blur: 16,
+                            opacity: 0.12,
+                            highQuality: settings.highGlass,
+                            padding: const EdgeInsets.all(3),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Flexible(
-                                  child: Text(
-                                    track.artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.64),
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
+                                _ModeTab(
+                                  label: 'Bài hát',
+                                  active: !_videoMode,
+                                  accent: accent,
+                                  onTap: () => _toggleVideoMode(false),
                                 ),
-                                if (widget.controller.isCurrentTrackCached &&
-                                    !_videoMode) ...[
-                                  const SizedBox(width: 6),
-                                  Icon(
-                                    Icons.bolt_rounded,
-                                    size: 14,
-                                    color: accent.withValues(alpha: 0.85),
-                                  ),
-                                ],
+                                _ModeTab(
+                                  label: 'Video',
+                                  active: _videoMode,
+                                  accent: accent,
+                                  onTap: () => _toggleVideoMode(true),
+                                ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                      SpringTap(
-                        onTap: () => widget.controller.toggleFavorite(track),
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Icon(
-                            isFav
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            color: isFav ? accent : Colors.white70,
-                            size: 27,
                           ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  if (widget.controller.errorMessage != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        widget.controller.errorMessage!,
-                        style: const TextStyle(
-                          color: Color(0xFFFF6961),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-
-                  const SizedBox(height: 10),
-
-                  // Progress Scrubber (isolated RepaintBoundary + custom SliderStyle)
-                  RepaintBoundary(
-                    child: _buildProgressBar(settings, accent),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // Main Playback Controls
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(
-                        onPressed: widget.controller.toggleShuffle,
-                        icon: Icon(
-                          Icons.shuffle_rounded,
-                          color: widget.controller.shuffle
-                              ? accent
-                              : Colors.white.withValues(alpha: 0.55),
-                          size: 22,
-                        ),
-                      ),
-                      SpringTap(
-                        onTap: widget.controller.previous,
-                        child: const Padding(
-                          padding: EdgeInsets.all(6),
-                          child: Icon(
-                            Icons.skip_previous_rounded,
-                            color: Colors.white,
-                            size: 38,
+                          const Spacer(),
+                          IconButton(
+                            tooltip: 'Tuỳ chỉnh trực tiếp',
+                            onPressed: () => _openQuickCustomiseSheet(context),
+                            icon: Icon(
+                              Icons.tune_rounded,
+                              color: Colors.white.withValues(alpha: 0.84),
+                              size: 23,
+                            ),
                           ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Center Stage: Video Player OR Live Synced Lyrics OR Artwork
+                      Expanded(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          switchInCurve: Curves.easeOutCubic,
+                          child: _videoMode
+                              ? _buildVideoView(accent)
+                              : _showLyrics
+                                  ? _buildLyricsView(track, settings, accent)
+                                  : _buildArtworkView(track, settings, accent),
                         ),
                       ),
-                      SpringTap(
-                        pressedScale: 0.90,
-                        onTap: _onPlayPauseTap,
-                        child: GlassSurface(
-                          borderRadius: 42,
-                          blur: 20,
-                          opacity: 0.22,
-                          tintColor: accent,
-                          isLens: true,
-                          highQuality: settings.highGlass,
-                          padding: const EdgeInsets.all(18),
-                          child: _isCenterBusy()
-                              ? const SizedBox(
-                                  width: 34,
-                                  height: 34,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    color: Colors.white,
+
+                      const SizedBox(height: 16),
+
+                      // Title, Artist & Favorite
+                      Row(
+                        children: [
+                          Expanded(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 220),
+                              layoutBuilder: (cur, prev) => Stack(
+                                alignment: Alignment.centerLeft,
+                                children: [...prev, ?cur],
+                              ),
+                              child: Column(
+                                key: ValueKey(track.id),
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    track.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.45,
+                                    ),
                                   ),
-                                )
-                              : AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 180),
-                                  transitionBuilder: (c, a) =>
-                                      ScaleTransition(scale: a, child: c),
-                                  child: Icon(
-                                    _isCenterPlaying()
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                    key: ValueKey(_isCenterPlaying()),
-                                    color: Colors.white,
-                                    size: 34,
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          track.artist,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.64),
+                                            fontSize: 14.5,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                      if (widget.controller.isCurrentTrackCached &&
+                                          !_videoMode) ...[
+                                        const SizedBox(width: 6),
+                                        Icon(
+                                          Icons.bolt_rounded,
+                                          size: 14,
+                                          color: accent.withValues(alpha: 0.85),
+                                        ),
+                                      ],
+                                    ],
                                   ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          SpringTap(
+                            onTap: () => widget.controller.toggleFavorite(track),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 200),
+                                transitionBuilder: (c, a) =>
+                                    ScaleTransition(scale: a, child: c),
+                                child: Icon(
+                                  isFav
+                                      ? Icons.favorite_rounded
+                                      : Icons.favorite_border_rounded,
+                                  key: ValueKey(isFav),
+                                  color: isFav ? accent : Colors.white70,
+                                  size: 27,
                                 ),
-                        ),
-                      ),
-                      SpringTap(
-                        onTap: () => widget.controller.next(),
-                        child: const Padding(
-                          padding: EdgeInsets.all(6),
-                          child: Icon(
-                            Icons.skip_next_rounded,
-                            color: Colors.white,
-                            size: 38,
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                      IconButton(
-                        onPressed: widget.controller.cycleRepeatMode,
-                        icon: Icon(
-                          widget.controller.repeatMode == PlayerRepeatMode.one
-                              ? Icons.repeat_one_rounded
-                              : Icons.repeat_rounded,
-                          color: widget.controller.repeatMode !=
-                                  PlayerRepeatMode.off
-                              ? accent
-                              : Colors.white.withValues(alpha: 0.55),
-                          size: 22,
-                        ),
-                      ),
-                    ],
-                  ),
 
-                  const SizedBox(height: 12),
-
-                  // Bottom Liquid Glass Utility Bar: Lyrics | Audio Lab | Queue
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _UtilityPill(
-                        icon: Icons.lyrics_rounded,
-                        label: 'Lời bài hát',
-                        active: _showLyrics && !_videoMode,
-                        accent: accent,
-                        highGlass: settings.highGlass,
-                        onTap: () {
-                          if (_videoMode) _toggleVideoMode(false);
-                          setState(() => _showLyrics = !_showLyrics);
-                          _maybeLoadLyrics();
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      _UtilityPill(
-                        icon: Icons.graphic_eq_rounded,
-                        label: 'Audio Lab',
-                        active: false,
-                        accent: accent,
-                        highGlass: settings.highGlass,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => AudioLabScreen(
-                              controller: widget.controller,
-                              settingsController: widget.settingsController,
+                      if (widget.controller.errorMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            widget.controller.errorMessage!,
+                            style: const TextStyle(
+                              color: Color(0xFFFF6961),
+                              fontSize: 12,
                             ),
                           ),
                         ),
+
+                      const SizedBox(height: 10),
+
+                      // Progress & Buffer Scrubber
+                      RepaintBoundary(
+                        child: _buildProgressBar(settings, accent),
                       ),
-                      const SizedBox(width: 8),
-                      _UtilityPill(
-                        icon: Icons.queue_music_rounded,
-                        label: 'Hàng đợi',
-                        active: false,
-                        accent: accent,
-                        highGlass: settings.highGlass,
-                        onTap: () => _openQueueSheet(context, accent),
+
+                      const SizedBox(height: 12),
+
+                      // Main Playback Controls
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          IconButton(
+                            onPressed: widget.controller.toggleShuffle,
+                            icon: Icon(
+                              Icons.shuffle_rounded,
+                              color: widget.controller.shuffle
+                                  ? accent
+                                  : Colors.white.withValues(alpha: 0.55),
+                              size: 22,
+                            ),
+                          ),
+                          SpringTap(
+                            onTap: widget.controller.previous,
+                            child: const Padding(
+                              padding: EdgeInsets.all(6),
+                              child: Icon(
+                                Icons.skip_previous_rounded,
+                                color: Colors.white,
+                                size: 38,
+                              ),
+                            ),
+                          ),
+                          SpringTap(
+                            pressedScale: 0.90,
+                            onTap: _onPlayPauseTap,
+                            child: GlassSurface(
+                              borderRadius: 42,
+                              blur: 20,
+                              opacity: 0.24,
+                              tintColor: accent,
+                              isLens: true,
+                              highQuality: settings.highGlass,
+                              padding: const EdgeInsets.all(18),
+                              child: _isCenterBusy()
+                                  ? const SizedBox(
+                                      width: 34,
+                                      height: 34,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : AnimatedSwitcher(
+                                      duration:
+                                          const Duration(milliseconds: 180),
+                                      transitionBuilder: (c, a) =>
+                                          ScaleTransition(scale: a, child: c),
+                                      child: Icon(
+                                        _isCenterPlaying()
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        key: ValueKey(_isCenterPlaying()),
+                                        color: Colors.white,
+                                        size: 34,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          SpringTap(
+                            onTap: () => widget.controller.next(),
+                            child: const Padding(
+                              padding: EdgeInsets.all(6),
+                              child: Icon(
+                                Icons.skip_next_rounded,
+                                color: Colors.white,
+                                size: 38,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: widget.controller.cycleRepeatMode,
+                            icon: Icon(
+                              widget.controller.repeatMode ==
+                                      PlayerRepeatMode.one
+                                  ? Icons.repeat_one_rounded
+                                  : Icons.repeat_rounded,
+                              color: widget.controller.repeatMode !=
+                                      PlayerRepeatMode.off
+                                  ? accent
+                                  : Colors.white.withValues(alpha: 0.55),
+                              size: 22,
+                            ),
+                          ),
+                        ],
                       ),
+
+                      const SizedBox(height: 12),
+
+                      // Bottom Utility Bar: Lyrics | Audio Lab | Queue
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _UtilityPill(
+                            icon: Icons.lyrics_rounded,
+                            label: 'Lời bài hát',
+                            active: _showLyrics && !_videoMode,
+                            accent: accent,
+                            highGlass: settings.highGlass,
+                            onTap: () {
+                              if (_videoMode) _toggleVideoMode(false);
+                              setState(() => _showLyrics = !_showLyrics);
+                              _maybeLoadLyrics();
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          _UtilityPill(
+                            icon: Icons.graphic_eq_rounded,
+                            label: 'Audio Lab',
+                            active: false,
+                            accent: accent,
+                            highGlass: settings.highGlass,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => AudioLabScreen(
+                                  controller: widget.controller,
+                                  settingsController: widget.settingsController,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _UtilityPill(
+                            icon: Icons.queue_music_rounded,
+                            label: 'Hàng đợi',
+                            active: false,
+                            accent: accent,
+                            highGlass: settings.highGlass,
+                            onTap: () => _openQueueSheet(context, accent),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
                     ],
                   ),
-                  const SizedBox(height: 14),
-                ],
+                ),
               ),
             ),
           ),
@@ -573,6 +685,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
           (val.position.inMilliseconds / totalMs).clamp(0.0, 1.0);
       return _sliderColumn(
         fraction: frac,
+        bufferedFraction: frac,
         pos: Duration(milliseconds: (frac * totalMs).round()),
         total: val.duration,
         isPlaying: val.isPlaying,
@@ -585,20 +698,30 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     return StreamBuilder<Duration>(
       stream: widget.controller.positionStream,
       initialData: widget.controller.currentPosition,
-      builder: (context, snap) {
-        final total = widget.controller.duration;
-        final totalMs = total.inMilliseconds.clamp(1, 1 << 30);
-        final pos = snap.data ?? Duration.zero;
-        final frac = _dragSeekFraction ??
-            (pos.inMilliseconds / totalMs).clamp(0.0, 1.0);
-        return _sliderColumn(
-          fraction: frac,
-          pos: Duration(milliseconds: (frac * totalMs).round()),
-          total: total,
-          isPlaying: widget.controller.isPlaying,
-          settings: settings,
-          accent: accent,
-          onSeek: widget.controller.seek,
+      builder: (context, posSnap) {
+        return StreamBuilder<Duration>(
+          stream: widget.controller.bufferedPositionStream,
+          initialData: widget.controller.bufferedPosition,
+          builder: (context, bufSnap) {
+            final total = widget.controller.duration;
+            final totalMs = total.inMilliseconds.clamp(1, 1 << 30);
+            final pos = posSnap.data ?? Duration.zero;
+            final buf = bufSnap.data ?? Duration.zero;
+            final frac = _dragSeekFraction ??
+                (pos.inMilliseconds / totalMs).clamp(0.0, 1.0);
+            final bufFrac = (buf.inMilliseconds / totalMs).clamp(frac, 1.0);
+
+            return _sliderColumn(
+              fraction: frac,
+              bufferedFraction: bufFrac,
+              pos: Duration(milliseconds: (frac * totalMs).round()),
+              total: total,
+              isPlaying: widget.controller.isPlaying,
+              settings: settings,
+              accent: accent,
+              onSeek: widget.controller.seek,
+            );
+          },
         );
       },
     );
@@ -606,6 +729,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
 
   Widget _sliderColumn({
     required double fraction,
+    required double bufferedFraction,
     required Duration pos,
     required Duration total,
     required bool isPlaying,
@@ -617,6 +741,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
       children: [
         CustomMusicSlider(
           value: fraction,
+          bufferedValue: bufferedFraction,
           isPlaying: isPlaying,
           style: settings.sliderStyle,
           accentColor: accent,
@@ -635,7 +760,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
               Text(
                 _fmt(pos),
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.56),
+                  color: Colors.white.withValues(alpha: 0.58),
                   fontSize: 12,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
@@ -643,7 +768,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
               Text(
                 _fmt(total),
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.56),
+                  color: Colors.white.withValues(alpha: 0.58),
                   fontSize: 12,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
@@ -672,7 +797,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
         ),
       );
     }
-    if (_videoError != null || _videoCtrl == null || !_videoCtrl!.value.isInitialized) {
+    if (_videoError != null ||
+        _videoCtrl == null ||
+        !_videoCtrl!.value.isInitialized) {
       return Center(
         key: const ValueKey('video_error'),
         child: GlassSurface(
@@ -680,7 +807,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off_rounded, color: Colors.white60, size: 34),
+              const Icon(Icons.videocam_off_rounded,
+                  color: Colors.white60, size: 34),
               const SizedBox(height: 8),
               Text(
                 _videoError ?? 'Không thể phát video cho bài hát này.',
@@ -721,14 +849,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
   }
 
   Widget _buildArtworkView(Track track, AppSettings settings, Color accent) {
-    final scale = widget.controller.isPlaying ? 1.0 : 0.91;
+    final scale = widget.controller.isPlaying ? 1.0 : 0.92;
+    final theme = LemielTheme.of(context);
 
     if (settings.playerStyle == PlayerStyle.vinyl) {
       return Center(
         key: const ValueKey('artwork_vinyl'),
         child: AnimatedScale(
           scale: scale,
-          duration: const Duration(milliseconds: 380),
+          duration: const Duration(milliseconds: 340),
           curve: Curves.easeOutBack,
           child: AnimatedBuilder(
             animation: _vinylCtrl,
@@ -744,8 +873,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                 color: const Color(0xFF0E0E13),
                 boxShadow: [
                   BoxShadow(
-                    color: accent.withValues(alpha: 0.25),
-                    blurRadius: 38,
+                    color: accent.withValues(alpha: theme.isClassic ? 0.14 : 0.24),
+                    blurRadius: 36,
                     spreadRadius: 2,
                   ),
                   BoxShadow(
@@ -761,11 +890,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      ClipOval(
-                        child: ArtworkImage(
-                          url: track.artworkUrl,
-                          size: 168,
-                          radius: 84,
+                      Hero(
+                        tag: 'now_playing_artwork_${track.id}',
+                        child: ClipOval(
+                          child: ArtworkImage(
+                            url: track.artworkUrl,
+                            size: 168,
+                            radius: 84,
+                          ),
                         ),
                       ),
                       Container(
@@ -792,44 +924,47 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
         key: const ValueKey('artwork_edge'),
         child: AnimatedScale(
           scale: scale,
-          duration: const Duration(milliseconds: 360),
+          duration: const Duration(milliseconds: 340),
           curve: Curves.easeOutBack,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ArtworkImage(url: track.artworkUrl, size: 380, radius: 28),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.22),
-                      width: 1.0,
-                    ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.36),
-                      ],
+          child: Hero(
+            tag: 'now_playing_artwork_${track.id}',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ArtworkImage(url: track.artworkUrl, size: 380, radius: 28),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.20),
+                        width: 1.0,
+                      ),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.34),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       );
     }
 
-    // Default: Flagship Liquid Glass Framed Artwork
+    // Default: Flagship Framed Artwork
     return Center(
       key: const ValueKey('artwork_flagship'),
       child: AnimatedScale(
         scale: scale,
-        duration: const Duration(milliseconds: 380),
+        duration: const Duration(milliseconds: 340),
         curve: Curves.easeOutBack,
         child: Container(
           constraints: const BoxConstraints(maxWidth: 324, maxHeight: 324),
@@ -837,14 +972,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
             borderRadius: BorderRadius.circular(28),
             boxShadow: [
               BoxShadow(
-                color: accent.withValues(alpha: 0.22),
-                blurRadius: 42,
+                color: accent.withValues(alpha: theme.isClassic ? 0.12 : 0.22),
+                blurRadius: 40,
                 offset: const Offset(0, 18),
               ),
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.56),
-                blurRadius: 34,
-                offset: const Offset(0, 18),
+                color: Colors.black.withValues(alpha: 0.52),
+                blurRadius: 32,
+                offset: const Offset(0, 16),
               ),
             ],
           ),
@@ -857,10 +992,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(28),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.24),
+                    color: Colors.white.withValues(
+                      alpha: theme.isClassic ? 0.14 : 0.24,
+                    ),
                     width: 1.1,
                   ),
-                  color: Colors.white.withValues(alpha: 0.06),
+                  color: Colors.white.withValues(alpha: 0.05),
                 ),
                 child: ArtworkImage(
                   url: track.artworkUrl,
@@ -922,10 +1059,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     }
 
     final lines = _lyricsResult.lines;
+    final hasTimestamps = _lyricsResult.isSynced;
     final align = switch (settings.lyricsAlign) {
       LyricsAlign.left => TextAlign.left,
       LyricsAlign.center => TextAlign.center,
       LyricsAlign.right => TextAlign.right,
+    };
+    final crossAlign = switch (settings.lyricsAlign) {
+      LyricsAlign.left => CrossAxisAlignment.start,
+      LyricsAlign.center => CrossAxisAlignment.center,
+      LyricsAlign.right => CrossAxisAlignment.end,
     };
 
     return StreamBuilder<Duration>(
@@ -934,32 +1077,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
       initialData: widget.controller.currentPosition,
       builder: (context, snap) {
         final pos = snap.data ?? Duration.zero;
-        int activeIndex = -1;
-        for (int i = 0; i < lines.length; i++) {
-          final t = lines[i].time;
-          if (t != null && pos >= t) {
-            activeIndex = i;
-          }
-        }
+        final activeIndex =
+            hasTimestamps ? computeActiveLyricIndex(lines, pos) : -1;
 
-        // Smoothly auto-scroll to active lyric line when it advances.
-        if (activeIndex >= 0 &&
-            activeIndex != _lastActiveLyricIndex &&
-            _lyricsScroll.hasClients) {
+        if (activeIndex >= 0 && activeIndex != _lastActiveLyricIndex) {
           _lastActiveLyricIndex = activeIndex;
-          final targetOffset = (activeIndex * 54.0 - 95.0).clamp(
-            0.0,
-            _lyricsScroll.position.maxScrollExtent,
-          );
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_lyricsScroll.hasClients) {
-              _lyricsScroll.animateTo(
-                targetOffset,
-                duration: const Duration(milliseconds: 360),
-                curve: Curves.easeOutCubic,
-              );
-            }
-          });
+          _scrollToLyricIndex(activeIndex);
         }
 
         return GlassSurface(
@@ -970,7 +1093,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Column(
             children: [
-              // Top Lyrics Toolbar: Provider Badge + Switch Source + Share Card Button
+              // Lyrics Toolbar: Provider Badge + Sync status + Share Card
               Row(
                 children: [
                   GestureDetector(
@@ -990,7 +1113,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                           Icon(Icons.hub_rounded, size: 13, color: accent),
                           const SizedBox(width: 5),
                           Text(
-                            'Nguồn: ${_lyricsResult.providerName}',
+                            hasTimestamps
+                                ? _lyricsResult.providerName
+                                : '${_lyricsResult.providerName} • Lời thường',
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 11,
@@ -1054,105 +1179,230 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
 
-              // Lyrics Lines List
+              // Smooth Edge-Faded Synchronized Lyrics Viewport
               Expanded(
-                child: ListView.builder(
-                  controller: _lyricsScroll,
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: lines.length,
-                  itemBuilder: (context, i) {
-                    final line = lines[i];
-                    final isActive = i == activeIndex;
-                    final dist = activeIndex < 0 ? 0 : (i - activeIndex).abs();
-                    final blurSigma = (settings.blurInactiveLyrics &&
-                            _lyricsResult.isSynced &&
-                            !isActive)
-                        ? (dist * 0.7).clamp(0.0, 2.2)
-                        : 0.0;
+                child: Stack(
+                  children: [
+                    NotificationListener<UserScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification.direction != ScrollDirection.idle &&
+                            hasTimestamps) {
+                          _onUserScrollLyrics();
+                        }
+                        return false;
+                      },
+                      child: ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: [0.0, 0.10, 0.88, 1.0],
+                          colors: [
+                            Colors.transparent,
+                            Colors.white,
+                            Colors.white,
+                            Colors.transparent,
+                          ],
+                        ).createShader(bounds),
+                        blendMode: BlendMode.dstIn,
+                        child: SingleChildScrollView(
+                          controller: _lyricsScroll,
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(vertical: 34),
+                          child: Column(
+                            crossAxisAlignment: crossAlign,
+                            children: List.generate(lines.length, (i) {
+                              final line = lines[i];
+                              final isActive = i == activeIndex;
+                              final isPast = activeIndex >= 0 && i < activeIndex;
+                              final dist = activeIndex < 0
+                                  ? 0
+                                  : (i - activeIndex).abs();
+                              final canSeek = line.time != null;
 
-                    final textWidget = AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      style: TextStyle(
-                        color: isActive || !_lyricsResult.isSynced
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.40),
-                        fontSize: isActive
-                            ? settings.lyricsFontSize
-                            : (settings.lyricsFontSize - 3.5).clamp(14.0, 24.0),
-                        fontWeight:
-                            isActive ? FontWeight.w800 : FontWeight.w500,
-                        height: 1.34,
-                        shadows: isActive &&
-                                settings.lyricsStyle == LyricsStyle.appleGlow
-                            ? [
-                                Shadow(
-                                  color: accent.withValues(alpha: 0.65),
-                                  blurRadius: 14,
+                              final targetColor = !hasTimestamps
+                                  ? Colors.white.withValues(alpha: 0.92)
+                                  : isActive
+                                      ? Colors.white
+                                      : isPast
+                                          ? Colors.white.withValues(alpha: 0.36)
+                                          : Colors.white.withValues(alpha: 0.56);
+
+                              final blurSigma = (settings.blurInactiveLyrics &&
+                                      hasTimestamps &&
+                                      !isActive &&
+                                      !_userScrollingLyrics)
+                                  ? (dist * 0.55).clamp(0.0, 1.8)
+                                  : 0.0;
+
+                              final textWidget = AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 260),
+                                curve: Curves.easeOutCubic,
+                                style: TextStyle(
+                                  color: targetColor,
+                                  fontSize: isActive
+                                      ? settings.lyricsFontSize
+                                      : (settings.lyricsFontSize -
+                                              (hasTimestamps ? 3.5 : 2.0))
+                                          .clamp(14.5, 24.0),
+                                  fontWeight: isActive
+                                      ? FontWeight.w800
+                                      : FontWeight.w500,
+                                  height: 1.38,
+                                  letterSpacing: isActive ? -0.3 : -0.1,
+                                  shadows: isActive &&
+                                          settings.lyricsStyle ==
+                                              LyricsStyle.appleGlow
+                                      ? [
+                                          Shadow(
+                                            color: accent.withValues(alpha: 0.65),
+                                            blurRadius: 14,
+                                          ),
+                                        ]
+                                      : null,
                                 ),
-                              ]
-                            : null,
-                      ),
-                      child: Text(line.text, textAlign: align),
-                    );
+                                child: Text(line.text, textAlign: align),
+                              );
 
-                    Widget styledLine = Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 6,
-                      ),
-                      child: blurSigma > 0.2
-                          ? ImageFiltered(
-                              imageFilter: ImageFilter.blur(
-                                sigmaX: blurSigma,
-                                sigmaY: blurSigma,
-                              ),
-                              child: textWidget,
-                            )
-                          : textWidget,
-                    );
+                              Widget lineBody = Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 9,
+                                  horizontal: 6,
+                                ),
+                                child: blurSigma > 0.25
+                                    ? ImageFiltered(
+                                        imageFilter: ImageFilter.blur(
+                                          sigmaX: blurSigma,
+                                          sigmaY: blurSigma,
+                                        ),
+                                        child: textWidget,
+                                      )
+                                    : textWidget,
+                              );
 
-                    if (isActive &&
-                        settings.lyricsStyle == LyricsStyle.karaokePill) {
-                      styledLine = AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          color: accent.withValues(alpha: 0.22),
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.48),
+                              if (isActive &&
+                                  settings.lyricsStyle ==
+                                      LyricsStyle.karaokePill) {
+                                lineBody = AnimatedContainer(
+                                  duration: const Duration(milliseconds: 240),
+                                  curve: Curves.easeOutCubic,
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(16),
+                                    color: accent.withValues(alpha: 0.24),
+                                    border: Border.all(
+                                      color: accent.withValues(alpha: 0.50),
+                                    ),
+                                  ),
+                                  child: lineBody,
+                                );
+                              } else if (hasTimestamps &&
+                                  settings.lyricsStyle ==
+                                      LyricsStyle.mochyMotion) {
+                                lineBody = AnimatedScale(
+                                  scale: isActive ? 1.04 : 0.96,
+                                  alignment: switch (settings.lyricsAlign) {
+                                    LyricsAlign.left => Alignment.centerLeft,
+                                    LyricsAlign.center => Alignment.center,
+                                    LyricsAlign.right => Alignment.centerRight,
+                                  },
+                                  duration: const Duration(milliseconds: 280),
+                                  curve: Curves.easeOutCubic,
+                                  child: lineBody,
+                                );
+                              } else if (isActive) {
+                                // Subtle active leading accent indicator for Apple Glow / Minimal
+                                lineBody = AnimatedContainer(
+                                  duration: const Duration(milliseconds: 240),
+                                  curve: Curves.easeOutCubic,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(14),
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                  ),
+                                  child: lineBody,
+                                );
+                              }
+
+                              return KeyedSubtree(
+                                key: i < _lyricKeys.length
+                                    ? _lyricKeys[i]
+                                    : null,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: canSeek
+                                      ? () {
+                                          HapticFeedback.selectionClick();
+                                          setState(() =>
+                                              _userScrollingLyrics = false);
+                                          _resumeAutoScrollTimer?.cancel();
+                                          widget.controller.seek(line.time!);
+                                          _scrollToLyricIndex(i, force: true);
+                                        }
+                                      : null,
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: lineBody,
+                                  ),
+                                ),
+                              );
+                            }),
                           ),
                         ),
-                        child: styledLine,
-                      );
-                    } else if (settings.lyricsStyle == LyricsStyle.mochyMotion) {
-                      styledLine = AnimatedScale(
-                        scale: isActive ? 1.03 : 0.96,
-                        alignment: switch (settings.lyricsAlign) {
-                          LyricsAlign.left => Alignment.centerLeft,
-                          LyricsAlign.center => Alignment.center,
-                          LyricsAlign.right => Alignment.centerRight,
-                        },
-                        duration: const Duration(milliseconds: 260),
-                        curve: Curves.easeOutBack,
-                        child: styledLine,
-                      );
-                    }
+                      ),
+                    ),
 
-                    return GestureDetector(
-                      onTap: line.time != null
-                          ? () => widget.controller.seek(line.time!)
-                          : null,
-                      child: styledLine,
-                    );
-                  },
+                    // "Return to active line" pill when user manually scrolled
+                    if (_userScrollingLyrics && activeIndex >= 0)
+                      Positioned(
+                        bottom: 8,
+                        right: 6,
+                        child: SpringTap(
+                          onTap: () {
+                            _resumeAutoScrollTimer?.cancel();
+                            setState(() => _userScrollingLyrics = false);
+                            _scrollToLyricIndex(activeIndex, force: true);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              color: accent,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.4),
+                                  blurRadius: 10,
+                                ),
+                              ],
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.my_location_rounded,
+                                    size: 13, color: Colors.white),
+                                SizedBox(width: 5),
+                                Text(
+                                  'Về câu đang hát',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
@@ -1162,7 +1412,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     );
   }
 
-  /// Mochy-style Live Customisation Sheet directly inside Now Playing!
+  /// Live Customisation Sheet directly inside Now Playing (includes Theme switcher!).
   void _openQuickCustomiseSheet(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -1210,6 +1460,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
               blur: 28,
               opacity: 0.22,
               tintColor: const Color(0xFF14141E),
+              isLens: true,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               child: SingleChildScrollView(
                 child: Column(
@@ -1236,67 +1487,149 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                       ),
                     ),
                     const SizedBox(height: 14),
-                    const Text('Mẫu hiển thị', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                    const Text('Chế độ giao diện',
+                        style: TextStyle(color: Colors.white70, fontSize: 12.5)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        chip('Flagship Glass', s.playerStyle == PlayerStyle.flagship,
-                            () => widget.settingsController.setPlayerStyle(PlayerStyle.flagship)),
-                        chip('Đĩa Vinyl xoay', s.playerStyle == PlayerStyle.vinyl,
-                            () => widget.settingsController.setPlayerStyle(PlayerStyle.vinyl)),
-                        chip('Tràn viền', s.playerStyle == PlayerStyle.edgeToEdge,
-                            () => widget.settingsController.setPlayerStyle(PlayerStyle.edgeToEdge)),
+                        chip(
+                          'Liquid Glass',
+                          s.visualTheme == AppVisualTheme.liquidGlass,
+                          () => widget.settingsController
+                              .setVisualTheme(AppVisualTheme.liquidGlass),
+                        ),
+                        chip(
+                          'Classic',
+                          s.visualTheme == AppVisualTheme.classic,
+                          () => widget.settingsController
+                              .setVisualTheme(AppVisualTheme.classic),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),
-                    const Text('Nền trình phát', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                    const Text('Mẫu hiển thị',
+                        style: TextStyle(color: Colors.white70, fontSize: 12.5)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        chip('Ánh sáng nền', s.backgroundStyle == PlayerBackgroundStyle.ambientGlow,
-                            () => widget.settingsController.setBackgroundStyle(PlayerBackgroundStyle.ambientGlow)),
-                        chip('Apple Blur', s.backgroundStyle == PlayerBackgroundStyle.appleBlur,
-                            () => widget.settingsController.setBackgroundStyle(PlayerBackgroundStyle.appleBlur)),
-                        chip('Tối giản', s.backgroundStyle == PlayerBackgroundStyle.darkGradient,
-                            () => widget.settingsController.setBackgroundStyle(PlayerBackgroundStyle.darkGradient)),
-                        chip('Đen OLED', s.backgroundStyle == PlayerBackgroundStyle.oledBlack,
-                            () => widget.settingsController.setBackgroundStyle(PlayerBackgroundStyle.oledBlack)),
+                        chip(
+                          'Flagship Glass',
+                          s.playerStyle == PlayerStyle.flagship,
+                          () => widget.settingsController
+                              .setPlayerStyle(PlayerStyle.flagship),
+                        ),
+                        chip(
+                          'Đĩa Vinyl xoay',
+                          s.playerStyle == PlayerStyle.vinyl,
+                          () => widget.settingsController
+                              .setPlayerStyle(PlayerStyle.vinyl),
+                        ),
+                        chip(
+                          'Tràn viền',
+                          s.playerStyle == PlayerStyle.edgeToEdge,
+                          () => widget.settingsController
+                              .setPlayerStyle(PlayerStyle.edgeToEdge),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),
-                    const Text('Thanh tua nhạc', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                    const Text('Nền trình phát',
+                        style: TextStyle(color: Colors.white70, fontSize: 12.5)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        chip('Sóng Mochy', s.sliderStyle == SliderStyle.mochyWavy,
-                            () => widget.settingsController.setSliderStyle(SliderStyle.mochyWavy)),
-                        chip('Apple Slim', s.sliderStyle == SliderStyle.appleSlim,
-                            () => widget.settingsController.setSliderStyle(SliderStyle.appleSlim)),
-                        chip('Liquid Pill', s.sliderStyle == SliderStyle.liquidPill,
-                            () => widget.settingsController.setSliderStyle(SliderStyle.liquidPill)),
+                        chip(
+                          'Ánh sáng nền',
+                          s.backgroundStyle == PlayerBackgroundStyle.ambientGlow,
+                          () => widget.settingsController.setBackgroundStyle(
+                              PlayerBackgroundStyle.ambientGlow),
+                        ),
+                        chip(
+                          'Apple Blur',
+                          s.backgroundStyle == PlayerBackgroundStyle.appleBlur,
+                          () => widget.settingsController.setBackgroundStyle(
+                              PlayerBackgroundStyle.appleBlur),
+                        ),
+                        chip(
+                          'Tối giản',
+                          s.backgroundStyle == PlayerBackgroundStyle.darkGradient,
+                          () => widget.settingsController.setBackgroundStyle(
+                              PlayerBackgroundStyle.darkGradient),
+                        ),
+                        chip(
+                          'Đen OLED',
+                          s.backgroundStyle == PlayerBackgroundStyle.oledBlack,
+                          () => widget.settingsController.setBackgroundStyle(
+                              PlayerBackgroundStyle.oledBlack),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),
-                    const Text('Hiệu ứng lời bài hát', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                    const Text('Thanh tua nhạc',
+                        style: TextStyle(color: Colors.white70, fontSize: 12.5)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        chip('Apple Glow', s.lyricsStyle == LyricsStyle.appleGlow,
-                            () => widget.settingsController.setLyricsStyle(LyricsStyle.appleGlow)),
-                        chip('Mochy Motion', s.lyricsStyle == LyricsStyle.mochyMotion,
-                            () => widget.settingsController.setLyricsStyle(LyricsStyle.mochyMotion)),
-                        chip('Karaoke', s.lyricsStyle == LyricsStyle.karaokePill,
-                            () => widget.settingsController.setLyricsStyle(LyricsStyle.karaokePill)),
-                        chip('Tối giản', s.lyricsStyle == LyricsStyle.minimal,
-                            () => widget.settingsController.setLyricsStyle(LyricsStyle.minimal)),
+                        chip(
+                          'Sóng Mochy',
+                          s.sliderStyle == SliderStyle.mochyWavy,
+                          () => widget.settingsController
+                              .setSliderStyle(SliderStyle.mochyWavy),
+                        ),
+                        chip(
+                          'Apple Slim',
+                          s.sliderStyle == SliderStyle.appleSlim,
+                          () => widget.settingsController
+                              .setSliderStyle(SliderStyle.appleSlim),
+                        ),
+                        chip(
+                          'Liquid Pill',
+                          s.sliderStyle == SliderStyle.liquidPill,
+                          () => widget.settingsController
+                              .setSliderStyle(SliderStyle.liquidPill),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Text('Hiệu ứng lời bài hát',
+                        style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        chip(
+                          'Apple Glow',
+                          s.lyricsStyle == LyricsStyle.appleGlow,
+                          () => widget.settingsController
+                              .setLyricsStyle(LyricsStyle.appleGlow),
+                        ),
+                        chip(
+                          'Mochy Motion',
+                          s.lyricsStyle == LyricsStyle.mochyMotion,
+                          () => widget.settingsController
+                              .setLyricsStyle(LyricsStyle.mochyMotion),
+                        ),
+                        chip(
+                          'Karaoke',
+                          s.lyricsStyle == LyricsStyle.karaokePill,
+                          () => widget.settingsController
+                              .setLyricsStyle(LyricsStyle.karaokePill),
+                        ),
+                        chip(
+                          'Tối giản',
+                          s.lyricsStyle == LyricsStyle.minimal,
+                          () => widget.settingsController
+                              .setLyricsStyle(LyricsStyle.minimal),
+                        ),
                       ],
                     ),
                   ],
@@ -1320,6 +1653,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
           blur: 26,
           opacity: 0.22,
           tintColor: const Color(0xFF14141D),
+          isLens: true,
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1381,6 +1715,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
               blur: 28,
               opacity: 0.20,
               tintColor: const Color(0xFF14141D),
+              isLens: true,
               child: Column(
                 children: [
                   const SizedBox(height: 10),
@@ -1531,7 +1866,6 @@ class _VinylGroovesPainter extends CustomPainter {
     for (double r = maxR * 0.62; r < maxR - 4; r += 5.5) {
       canvas.drawCircle(center, r, groovePaint);
     }
-    // Vinyl light specular sweep
     final sheen = Paint()
       ..shader = SweepGradient(
         colors: [

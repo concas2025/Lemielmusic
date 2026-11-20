@@ -1,6 +1,10 @@
 import '../models/track.dart';
 
 class LocalAudioProxy {
+  final Future<ResolvedAudioStream?> Function(String id)? onRefreshStream;
+
+  LocalAudioProxy({this.onRefreshStream});
+
   Future<Uri> registerStream(
     String id,
     ResolvedAudioStream stream, {

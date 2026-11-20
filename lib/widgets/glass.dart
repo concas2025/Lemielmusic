@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import '../models/app_settings.dart';
 import '../models/track.dart';
+import '../theme/lemiel_theme.dart';
 
 /// Builds a 4x5 saturation color matrix for Apple iOS 26 Liquid Glass vibrancy.
 List<double> _saturationMatrix(double sat) {
@@ -20,6 +21,11 @@ List<double> _saturationMatrix(double sat) {
   ];
 }
 
+/// Adaptive surface component:
+/// - In **Liquid Glass** mode: translucent frosted glass with vibrancy boost and
+///   subtle angled specular rim highlights.
+/// - In **Classic** mode: crisp, solid elevated surface with clean borders and
+///   high readability (zero BackdropFilter blur).
 class GlassSurface extends StatelessWidget {
   final Widget child;
   final double borderRadius;
@@ -48,12 +54,59 @@ class GlassSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base = tintColor ?? Colors.white;
-    final effectiveBlur = highQuality ? blur : (blur * 0.45).clamp(4.0, 10.0);
+    final theme = LemielTheme.of(context);
 
-    final filter = highQuality
+    // Classic mode: crisp, readable, elevated solid surface with subtle border.
+    if (theme.isClassic) {
+      final hasAccentTint =
+          tintColor != null &&
+          tintColor != Colors.white &&
+          tintColor != const Color(0xFF1A1A26) &&
+          tintColor != const Color(0xFF14141E) &&
+          tintColor != const Color(0xFF14141D);
+      final baseSurface = isLens ? theme.surfaceElevated : theme.surface;
+      final bg = hasAccentTint
+          ? Color.alphaBlend(
+              tintColor!.withValues(alpha: (opacity + 0.14).clamp(0.18, 0.85)),
+              baseSurface,
+            )
+          : baseSurface;
+
+      return Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(borderRadius),
+          border: border ??
+              Border.all(
+                color: hasAccentTint
+                    ? tintColor!.withValues(alpha: 0.45)
+                    : Colors.white.withValues(alpha: isLens ? 0.12 : 0.08),
+                width: 1.0,
+              ),
+          boxShadow: boxShadow ??
+              (isLens
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.34),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ]
+                  : null),
+        ),
+        child: child,
+      );
+    }
+
+    // Liquid Glass mode: refined translucent glass + vibrancy + specular rim.
+    final base = tintColor ?? Colors.white;
+    final useHigh = highQuality && theme.highGlass;
+    final effectiveBlur = useHigh ? blur : (blur * 0.45).clamp(4.0, 10.0);
+
+    final filter = useHigh
         ? ImageFilter.compose(
-            outer: ColorFilter.matrix(_saturationMatrix(isLens ? 1.65 : 1.38)),
+            outer: ColorFilter.matrix(_saturationMatrix(isLens ? 1.55 : 1.32)),
             inner: ImageFilter.blur(
               sigmaX: effectiveBlur,
               sigmaY: effectiveBlur,
@@ -82,9 +135,11 @@ class GlassSurface extends StatelessWidget {
                 end: Alignment.bottomRight,
                 stops: const [0.0, 0.45, 1.0],
                 colors: [
-                  base.withValues(alpha: (opacity + (isLens ? 0.11 : 0.06)).clamp(0.0, 0.95)),
-                  base.withValues(alpha: (opacity * 0.65).clamp(0.0, 0.9)),
-                  base.withValues(alpha: (opacity * 0.85).clamp(0.0, 0.9)),
+                  base.withValues(
+                    alpha: (opacity + (isLens ? 0.10 : 0.05)).clamp(0.0, 0.94),
+                  ),
+                  base.withValues(alpha: (opacity * 0.65).clamp(0.0, 0.90)),
+                  base.withValues(alpha: (opacity * 0.85).clamp(0.0, 0.90)),
                 ],
               ),
               border: border,
@@ -102,8 +157,8 @@ class GlassSurface extends StatelessWidget {
           boxShadow: boxShadow ??
               [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.36),
-                  blurRadius: 24,
+                  color: Colors.black.withValues(alpha: 0.34),
+                  blurRadius: 22,
                   offset: const Offset(0, 10),
                 ),
               ],
@@ -136,33 +191,31 @@ class _LiquidSpecularRimPainter extends CustomPainter {
       Radius.circular(borderRadius),
     );
 
-    // Subtle upper specular highlight inside the glass edge.
     final sheenPaint = Paint()
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        stops: const [0.0, 0.28, 1.0],
+        stops: const [0.0, 0.26, 1.0],
         colors: [
-          Colors.white.withValues(alpha: isLens ? 0.22 : 0.11),
+          Colors.white.withValues(alpha: isLens ? 0.20 : 0.10),
           Colors.white.withValues(alpha: 0.01),
           Colors.transparent,
         ],
       ).createShader(rect);
     canvas.drawRRect(rrect, sheenPaint);
 
-    // Angled specular rim border (bright top-left & softer bottom-right refraction).
     final rimPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = isLens ? 1.15 : 0.95
+      ..strokeWidth = isLens ? 1.1 : 0.9
       ..shader = LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         stops: const [0.0, 0.38, 0.68, 1.0],
         colors: [
-          Colors.white.withValues(alpha: isLens ? 0.56 : 0.34),
-          Colors.white.withValues(alpha: isLens ? 0.14 : 0.07),
-          (tintColor ?? Colors.white).withValues(alpha: isLens ? 0.14 : 0.06),
-          Colors.white.withValues(alpha: isLens ? 0.34 : 0.20),
+          Colors.white.withValues(alpha: isLens ? 0.50 : 0.30),
+          Colors.white.withValues(alpha: isLens ? 0.12 : 0.06),
+          (tintColor ?? Colors.white).withValues(alpha: isLens ? 0.12 : 0.05),
+          Colors.white.withValues(alpha: isLens ? 0.30 : 0.18),
         ],
       ).createShader(rect);
     canvas.drawRRect(rrect, rimPaint);
@@ -188,7 +241,7 @@ class SpringTap extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.pressedScale = 0.94,
+    this.pressedScale = 0.95,
     this.haptic = true,
   });
 
@@ -213,10 +266,10 @@ class _SpringTapState extends State<SpringTap>
   }
 
   void _animateTo(double target) {
-    final spring = const SpringDescription(
+    const spring = SpringDescription(
       mass: 1.0,
       stiffness: 520,
-      damping: 24,
+      damping: 26,
     );
     _ctrl.animateWith(SpringSimulation(spring, _ctrl.value, target, 0));
   }
@@ -245,7 +298,7 @@ class _SpringTapState extends State<SpringTap>
       child: AnimatedBuilder(
         animation: _ctrl,
         builder: (_, child) => Transform.scale(
-          scale: _ctrl.value.clamp(0.85, 1.06),
+          scale: _ctrl.value.clamp(0.86, 1.04),
           child: child,
         ),
         child: widget.child,
@@ -254,7 +307,7 @@ class _SpringTapState extends State<SpringTap>
   }
 }
 
-/// Subtle staggered fade + upward slide entry animation.
+/// Short, purposeful staggered fade + slight upward slide entry animation.
 class StaggeredFadeSlide extends StatefulWidget {
   final Widget child;
   final int index;
@@ -264,7 +317,7 @@ class StaggeredFadeSlide extends StatefulWidget {
     super.key,
     required this.child,
     this.index = 0,
-    this.delayStep = const Duration(milliseconds: 35),
+    this.delayStep = const Duration(milliseconds: 28),
   });
 
   @override
@@ -282,15 +335,15 @@ class _StaggeredFadeSlideState extends State<StaggeredFadeSlide>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 360),
+      duration: const Duration(milliseconds: 280),
     );
     _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
     _offset = Tween<Offset>(
-      begin: const Offset(0, 0.08),
+      begin: const Offset(0, 0.05),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
-    final delayMs = (widget.index.clamp(0, 10)) * widget.delayStep.inMilliseconds;
+    final delayMs = (widget.index.clamp(0, 8)) * widget.delayStep.inMilliseconds;
     if (delayMs == 0) {
       _ctrl.forward();
     } else {
@@ -319,6 +372,7 @@ class _StaggeredFadeSlideState extends State<StaggeredFadeSlide>
 }
 
 /// GPU-optimized Ambient Background isolated inside a RepaintBoundary.
+/// Automatically tones down into a crisp, readable dark canvas in Classic mode.
 class AmbientBackground extends StatelessWidget {
   final String? artworkUrl;
   final Color accentColor;
@@ -335,9 +389,41 @@ class AmbientBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = LemielTheme.of(context);
     final isOled = style == PlayerBackgroundStyle.oledBlack;
     final isDarkGrad = style == PlayerBackgroundStyle.darkGradient;
     final isAppleBlur = style == PlayerBackgroundStyle.appleBlur;
+
+    if (theme.isClassic) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          RepaintBoundary(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: isOled ? Colors.black : theme.canvas,
+                gradient: isOled
+                    ? null
+                    : LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0.0, 0.34, 1.0],
+                        colors: [
+                          Color.alphaBlend(
+                            accentColor.withValues(alpha: 0.12),
+                            theme.canvas,
+                          ),
+                          theme.canvas,
+                          const Color(0xFF0A0B10),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      );
+    }
 
     return Stack(
       fit: StackFit.expand,
@@ -346,7 +432,7 @@ class AmbientBackground extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ColoredBox(color: isOled ? Colors.black : const Color(0xFF06060A)),
+              ColoredBox(color: isOled ? Colors.black : theme.canvas),
               if (!isOled) ...[
                 Positioned(
                   top: -130,
@@ -359,7 +445,7 @@ class AmbientBackground extends StatelessWidget {
                       gradient: RadialGradient(
                         colors: [
                           accentColor.withValues(
-                            alpha: isDarkGrad ? 0.14 : 0.25,
+                            alpha: isDarkGrad ? 0.12 : 0.22,
                           ),
                           Colors.transparent,
                         ],
@@ -378,7 +464,7 @@ class AmbientBackground extends StatelessWidget {
                       gradient: RadialGradient(
                         colors: [
                           const Color(0xFF5E5CE6).withValues(
-                            alpha: isDarkGrad ? 0.10 : 0.22,
+                            alpha: isDarkGrad ? 0.08 : 0.18,
                           ),
                           Colors.transparent,
                         ],
@@ -392,10 +478,10 @@ class AmbientBackground extends StatelessWidget {
                   artworkUrl != null &&
                   artworkUrl!.isNotEmpty)
                 AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 700),
+                  duration: const Duration(milliseconds: 650),
                   child: Opacity(
                     key: ValueKey('${artworkUrl}_${style.name}'),
-                    opacity: isAppleBlur ? 0.52 : 0.30,
+                    opacity: isAppleBlur ? 0.48 : 0.26,
                     child: ImageFiltered(
                       imageFilter: ImageFilter.blur(
                         sigmaX: isAppleBlur ? 42 : 52,
@@ -420,14 +506,14 @@ class AmbientBackground extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       colors: isAppleBlur
                           ? [
-                              Colors.black.withValues(alpha: 0.18),
-                              const Color(0xFF07070B).withValues(alpha: 0.56),
-                              const Color(0xFF06060A).withValues(alpha: 0.88),
+                              Colors.black.withValues(alpha: 0.22),
+                              const Color(0xFF07070B).withValues(alpha: 0.58),
+                              const Color(0xFF06060A).withValues(alpha: 0.90),
                             ]
                           : [
-                              Colors.black.withValues(alpha: 0.24),
-                              const Color(0xFF06060A).withValues(alpha: 0.72),
-                              const Color(0xFF06060A).withValues(alpha: 0.95),
+                              Colors.black.withValues(alpha: 0.26),
+                              const Color(0xFF06060A).withValues(alpha: 0.74),
+                              const Color(0xFF06060A).withValues(alpha: 0.96),
                             ],
                     ),
                   ),
@@ -591,17 +677,23 @@ class TrackTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = LemielTheme.of(context);
     return SpringTap(
-      pressedScale: 0.975,
+      pressedScale: 0.98,
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
+        duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.symmetric(vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: isCurrent
             ? BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
-                color: accentColor.withValues(alpha: 0.12),
+                color: theme.isClassic
+                    ? Color.alphaBlend(
+                        accentColor.withValues(alpha: 0.15),
+                        theme.surface,
+                      )
+                    : accentColor.withValues(alpha: 0.13),
                 border: Border.all(
                   color: accentColor.withValues(alpha: 0.38),
                   width: 0.9,
@@ -659,7 +751,7 @@ class TrackTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.56),
+                      color: Colors.white.withValues(alpha: 0.58),
                       fontSize: 12.5,
                     ),
                   ),
@@ -686,7 +778,7 @@ class TrackTile extends StatelessWidget {
                 tooltip: 'Thêm vào Playlist',
                 icon: Icon(
                   Icons.playlist_add_rounded,
-                  color: Colors.white.withValues(alpha: 0.48),
+                  color: Colors.white.withValues(alpha: 0.50),
                   size: 21,
                 ),
                 visualDensity: VisualDensity.compact,
@@ -697,7 +789,7 @@ class TrackTile extends StatelessWidget {
                 tooltip: 'Thêm vào hàng đợi',
                 icon: Icon(
                   Icons.queue_play_next_rounded,
-                  color: Colors.white.withValues(alpha: 0.48),
+                  color: Colors.white.withValues(alpha: 0.50),
                   size: 20,
                 ),
                 visualDensity: VisualDensity.compact,

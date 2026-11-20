@@ -1,6 +1,7 @@
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import '../theme/lemiel_theme.dart';
 import 'glass.dart';
 
 class LiquidDockItem {
@@ -9,13 +10,13 @@ class LiquidDockItem {
   const LiquidDockItem({required this.icon, required this.label});
 }
 
-/// BitChord / iOS 26 style floating Liquid Glass Navigation Dock:
-/// - Main floating Liquid Glass capsule with a spring-physics sliding Lens pill
-///   that supports both tap and horizontal drag-scrubbing across tabs.
-/// - Separated circular Liquid Glass Search Orb on the right (index == items.length).
+/// Floating Navigation Dock sharing identical layout and spring motion across
+/// both Liquid Glass and Classic themes:
+/// - Main floating capsule with spring-physics sliding selection pill (tap & scrub).
+/// - Separated circular Search Orb on the right (index == items.length).
 class LiquidFloatingDock extends StatefulWidget {
   final List<LiquidDockItem> items;
-  final int activeIndex; // 0..items.length-1 = dock tabs, items.length = search orb
+  final int activeIndex;
   final Color accentColor;
   final bool highGlass;
   final ValueChanged<int> onSelect;
@@ -63,7 +64,7 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
   }
 
   void _springTo(double target) {
-    const spring = SpringDescription(mass: 1.0, stiffness: 360, damping: 24);
+    const spring = SpringDescription(mass: 1.0, stiffness: 360, damping: 25);
     _lensPos.animateWith(SpringSimulation(spring, _lensPos.value, target, 0));
   }
 
@@ -75,11 +76,12 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
 
   @override
   Widget build(BuildContext context) {
+    final theme = LemielTheme.of(context);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18),
       child: Row(
         children: [
-          // Main Liquid Glass Tab Capsule
           Expanded(
             child: GlassSurface(
               borderRadius: 32,
@@ -117,7 +119,6 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
                       },
                       child: Stack(
                         children: [
-                          // Sliding Liquid Glass Selection Lens
                           if (!_isSearchActive)
                             AnimatedBuilder(
                               animation: _lensPos,
@@ -130,34 +131,51 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
                                   bottom: 0,
                                   width: tabWidth,
                                   child: AnimatedScale(
-                                    scale: _isDragging ? 1.06 : 1.0,
+                                    scale: _isDragging ? 1.05 : 1.0,
                                     duration: const Duration(milliseconds: 160),
                                     child: Container(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(26),
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: [
-                                            Colors.white.withValues(alpha: 0.22),
-                                            widget.accentColor
-                                                .withValues(alpha: 0.16),
-                                          ],
-                                        ),
-                                        border: Border.all(
-                                          color:
-                                              Colors.white.withValues(alpha: 0.30),
-                                          width: 0.9,
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: widget.accentColor
-                                                .withValues(alpha: 0.22),
-                                            blurRadius: 14,
-                                            spreadRadius: -2,
-                                          ),
-                                        ],
-                                      ),
+                                      decoration: theme.isClassic
+                                          ? BoxDecoration(
+                                              borderRadius:
+                                                  BorderRadius.circular(26),
+                                              color: Color.alphaBlend(
+                                                widget.accentColor
+                                                    .withValues(alpha: 0.18),
+                                                const Color(0xFF2B3042),
+                                              ),
+                                              border: Border.all(
+                                                color: widget.accentColor
+                                                    .withValues(alpha: 0.35),
+                                                width: 0.9,
+                                              ),
+                                            )
+                                          : BoxDecoration(
+                                              borderRadius:
+                                                  BorderRadius.circular(26),
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  Colors.white
+                                                      .withValues(alpha: 0.22),
+                                                  widget.accentColor
+                                                      .withValues(alpha: 0.16),
+                                                ],
+                                              ),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.30),
+                                                width: 0.9,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: widget.accentColor
+                                                      .withValues(alpha: 0.20),
+                                                  blurRadius: 12,
+                                                  spreadRadius: -2,
+                                                ),
+                                              ],
+                                            ),
                                     ),
                                   ),
                                 );
@@ -179,9 +197,9 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       AnimatedScale(
-                                        scale: active ? 1.1 : 1.0,
+                                        scale: active ? 1.08 : 1.0,
                                         duration:
-                                            const Duration(milliseconds: 220),
+                                            const Duration(milliseconds: 200),
                                         curve: Curves.easeOutBack,
                                         child: Icon(
                                           item.icon,
@@ -220,12 +238,9 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
               ),
             ),
           ),
-
           const SizedBox(width: 12),
-
-          // Separated Circular Liquid Glass Search Orb (iOS 26 / BitChord)
           SpringTap(
-            pressedScale: 0.88,
+            pressedScale: 0.90,
             onTap: () => widget.onSelect(widget.items.length),
             child: GlassSurface(
               borderRadius: 32,
@@ -244,7 +259,7 @@ class _LiquidFloatingDockState extends State<LiquidFloatingDock>
                   size: 26,
                   color: _isSearchActive
                       ? Colors.white
-                      : Colors.white.withValues(alpha: 0.85),
+                      : Colors.white.withValues(alpha: 0.86),
                 ),
               ),
             ),

@@ -158,6 +158,84 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
+          // Quick Resume Hero Card (when user has history & nothing currently playing)
+          if (current == null && history.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: SpringTap(
+                  onTap: () => widget.controller
+                      .playTrack(history.first, queue: history),
+                  child: GlassSurface(
+                    borderRadius: 22,
+                    opacity: 0.14,
+                    tintColor: accent,
+                    highQuality: settings.highGlass,
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        ArtworkImage(
+                          url: history.first.artworkUrl,
+                          size: 56,
+                          radius: 14,
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'TIẾP TỤC NGHE',
+                                style: TextStyle(
+                                  color: accent,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                history.first.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                history.first.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.60),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: accent,
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           // Quick Studio Pills: Audio Lab + Import Playlist
           SliverToBoxAdapter(
             child: Padding(

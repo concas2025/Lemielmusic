@@ -98,6 +98,42 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                 ),
               ),
 
+              // 0. Dual Theme Selector: Liquid Glass vs Classic
+              SliverToBoxAdapter(
+                child: _Section(
+                  title: 'Chế độ giao diện (Theme)',
+                  icon: Icons.contrast_rounded,
+                  accent: accent,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _ThemeCardOption(
+                          title: 'Liquid Glass',
+                          subtitle: 'Kính mờ, độ sâu & phản chiếu',
+                          icon: Icons.blur_on_rounded,
+                          selected: s.visualTheme == AppVisualTheme.liquidGlass,
+                          accent: accent,
+                          onTap: () => widget.settingsController
+                              .setVisualTheme(AppVisualTheme.liquidGlass),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _ThemeCardOption(
+                          title: 'Classic',
+                          subtitle: 'Gọn, sắc nét & dễ đọc',
+                          icon: Icons.layers_rounded,
+                          selected: s.visualTheme == AppVisualTheme.classic,
+                          accent: accent,
+                          onTap: () => widget.settingsController
+                              .setVisualTheme(AppVisualTheme.classic),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
               // 1. Player UI Style
               SliverToBoxAdapter(
                 child: _Section(
@@ -287,31 +323,33 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                           );
                         }).toList(),
                       ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _OptionPill(
-                              label: 'Liquid Glass Đầy đủ',
-                              selected: s.glassQuality == GlassQuality.high,
-                              accent: accent,
-                              onTap: () => widget.settingsController
-                                  .setGlassQuality(GlassQuality.high),
+                      if (s.visualTheme == AppVisualTheme.liquidGlass) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _OptionPill(
+                                label: 'Liquid Glass Đầy đủ',
+                                selected: s.glassQuality == GlassQuality.high,
+                                accent: accent,
+                                onTap: () => widget.settingsController
+                                    .setGlassQuality(GlassQuality.high),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _OptionPill(
-                              label: 'Tiết kiệm pin',
-                              selected:
-                                  s.glassQuality == GlassQuality.performance,
-                              accent: accent,
-                              onTap: () => widget.settingsController
-                                  .setGlassQuality(GlassQuality.performance),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _OptionPill(
+                                label: 'Tiết kiệm pin',
+                                selected:
+                                    s.glassQuality == GlassQuality.performance,
+                                accent: accent,
+                                onTap: () => widget.settingsController
+                                    .setGlassQuality(GlassQuality.performance),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -717,6 +755,75 @@ class _Section extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeCardOption extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _ThemeCardOption({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SpringTap(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: selected
+              ? accent.withValues(alpha: 0.24)
+              : Colors.white.withValues(alpha: 0.06),
+          border: Border.all(
+            color: selected ? accent : Colors.white.withValues(alpha: 0.14),
+            width: selected ? 1.4 : 0.9,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 19, color: selected ? accent : Colors.white70),
+                const Spacer(),
+                if (selected)
+                  Icon(Icons.check_circle_rounded, size: 18, color: accent),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.58),
+                fontSize: 11.5,
+              ),
+            ),
           ],
         ),
       ),

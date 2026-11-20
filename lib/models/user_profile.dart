@@ -1,10 +1,21 @@
 import 'dart:math';
+import 'package:material_ui/material_ui.dart';
 import 'track.dart';
 
 class UserProfile {
+  static const List<List<Color>> avatarGradients = [
+    [Color(0xFFFF375F), Color(0xFF6E6BF5)],
+    [Color(0xFF6E6BF5), Color(0xFF2DD4BF)],
+    [Color(0xFFFF9F0A), Color(0xFFFF375F)],
+    [Color(0xFF2DD4BF), Color(0xFF2F80ED)],
+    [Color(0xFFEA7FA2), Color(0xFF7B61FF)],
+    [Color(0xFF525866), Color(0xFF222530)],
+  ];
+
   final String displayName;
   final String bio;
   final String? avatarPath;
+  final int avatarPresetIndex;
   final String memberId;
   final String joinedDate;
   final bool silverCard;
@@ -16,6 +27,7 @@ class UserProfile {
     required this.displayName,
     this.bio = 'Âm nhạc là ngôn ngữ của cảm xúc',
     this.avatarPath,
+    this.avatarPresetIndex = 0,
     required this.memberId,
     required this.joinedDate,
     this.silverCard = false,
@@ -40,6 +52,9 @@ class UserProfile {
     );
   }
 
+  List<Color> get avatarColors =>
+      avatarGradients[avatarPresetIndex.clamp(0, avatarGradients.length - 1)];
+
   String get initials {
     final parts = displayName
         .trim()
@@ -62,6 +77,7 @@ class UserProfile {
     String? bio,
     String? avatarPath,
     bool clearAvatar = false,
+    int? avatarPresetIndex,
     String? memberId,
     String? joinedDate,
     bool? silverCard,
@@ -73,6 +89,7 @@ class UserProfile {
       displayName: displayName ?? this.displayName,
       bio: bio ?? this.bio,
       avatarPath: clearAvatar ? null : (avatarPath ?? this.avatarPath),
+      avatarPresetIndex: avatarPresetIndex ?? this.avatarPresetIndex,
       memberId: memberId ?? this.memberId,
       joinedDate: joinedDate ?? this.joinedDate,
       silverCard: silverCard ?? this.silverCard,
@@ -86,6 +103,7 @@ class UserProfile {
         'displayName': displayName,
         'bio': bio,
         'avatarPath': avatarPath,
+        'avatarPresetIndex': avatarPresetIndex,
         'memberId': memberId,
         'joinedDate': joinedDate,
         'silverCard': silverCard,
@@ -109,6 +127,9 @@ class UserProfile {
           : fallback.displayName,
       bio: json['bio'] as String? ?? fallback.bio,
       avatarPath: json['avatarPath'] as String?,
+      avatarPresetIndex:
+          ((json['avatarPresetIndex'] as num?)?.toInt() ?? 0)
+              .clamp(0, avatarGradients.length - 1),
       memberId: (json['memberId'] as String?)?.isNotEmpty == true
           ? json['memberId'] as String
           : fallback.memberId,

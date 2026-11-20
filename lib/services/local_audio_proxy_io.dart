@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import '../models/track.dart';
 
 class _CachedTrackBuffer {
@@ -36,8 +37,7 @@ class _CachedTrackBuffer {
         return;
       }
       try {
-        _raf ??= await file.open(mode: FileMode.writeOnlyAppend);
-        // Ensure random read/write access by reopening in write/read mode once.
+        _raf ??= await file.open(mode: FileMode.write);
         final raf = _raf!;
         final result = await action(raf);
         completer.complete(result);
@@ -75,15 +75,6 @@ class _CachedTrackBuffer {
     });
   }
 
-  bool hasAllChunksInRange(int start, int end) {
-    final first = start ~/ chunkSize;
-    final last = end ~/ chunkSize;
-    for (int c = first; c <= last; c++) {
-      if (!downloadedChunks[c]) return false;
-    }
-    return true;
-  }
-
   Future<void> closeAndDelete() async {
     closed = true;
     try {
@@ -101,21 +92,28 @@ class _CachedTrackBuffer {
 
 /// High-speed local loopback HTTP server for iOS AVPlayer compatibility.
 /// - Translates AVPlayer HEAD / GET / Range requests into ranged chunk fetches
-///   against YouTube CDN (which rejects non-Range GET and HEAD with HTTP 403).
-/// - Uses a persistent keep-alive HttpClient (zero repeated TLS handshakes).
-/// - Maintains a chunked local temp-file cache with background prefetch for
-///   audio tracks so lyrics tap-to-seek and scrubber drags are instant (<15ms).
+///   against YouTube CDN.
+/// - Validates exact byte length per chunk (prevents truncated zeroed audio frames).
+/// - Uses a persistent keep-alive HttpClient + chunked temp-file cache with
+///   background prefetch for instant (<15ms) lyrics tap-to-seek.
+/// - Supports automatic stream URL refresh via [onRefreshStream] if a CDN URL
+///   expires (HTTP 403/410) mid-playback.
 class LocalAudioProxy {
-  static const int _chunkSize = 256 * 1024; // 256 KB chunks for snappy seek + prefetch
+  static const int _chunkSize = 256 * 1024; // 256 KB chunks
   static const int _maxDiskCachedTracks = 8;
-  static const int _maxPrefetchBytes = 24 * 1024 * 1024; // Cache audio <= 24 MB
+  static const int _maxPrefetchBytes = 40 * 1024 * 1024; // Cache tracks <= 40 MB
+
+  final Future<ResolvedAudioStream?> Function(String id)? onRefreshStream;
 
   HttpServer? _server;
   HttpClient? _httpClient;
   final Map<String, ResolvedAudioStream> _streams = {};
   final Map<String, _CachedTrackBuffer> _diskBuffers = {};
   final Set<String> _prefetching = {};
+  final Map<String, Future<ResolvedAudioStream?>> _refreshing = {};
   int _seq = 0;
+
+  LocalAudioProxy({this.onRefreshStream});
 
   Directory get _cacheDir =>
       Directory('${Directory.systemTemp.path}${Platform.pathSeparator}lemiel_audio_cache');
@@ -124,8 +122,8 @@ class LocalAudioProxy {
     if (_server != null) return;
     _httpClient ??= HttpClient()
       ..maxConnectionsPerHost = 6
-      ..idleTimeout = const Duration(seconds: 20)
-      ..connectionTimeout = const Duration(seconds: 5);
+      ..idleTimeout = const Duration(seconds: 25)
+      ..connectionTimeout = const Duration(seconds: 6);
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
     server.listen(_handleRequest, onError: (_) {});
@@ -148,11 +146,12 @@ class LocalAudioProxy {
         : (stream.mimeType.contains('webm') ? 'webm' : 'm4a');
 
     if (enableCache &&
-        !isVideo &&
         stream.contentLength > 0 &&
         stream.contentLength <= _maxPrefetchBytes) {
       await _ensureDiskBuffer(id, stream.contentLength, ext);
-      unawaited(_prefetchInBackground(id));
+      if (!isVideo) {
+        unawaited(_prefetchInBackground(id));
+      }
     }
 
     final seq = ++_seq;
@@ -178,7 +177,6 @@ class LocalAudioProxy {
       await existing.closeAndDelete();
     }
 
-    // Evict oldest buffers if exceeding limit.
     while (_diskBuffers.length >= _maxDiskCachedTracks) {
       final oldestKey = _diskBuffers.entries
           .reduce((a, b) => a.value.lastAccess.isBefore(b.value.lastAccess) ? a : b)
@@ -201,7 +199,8 @@ class LocalAudioProxy {
       await buffer.initFile();
       _diskBuffers[id] = buffer;
       return buffer;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[LemielAudio] Disk cache init failed for $id: $e');
       return null;
     }
   }
@@ -211,13 +210,22 @@ class LocalAudioProxy {
     final buffer = _diskBuffers[id];
     if (buffer == null || buffer.closed) return;
     _prefetching.add(id);
+    int consecutiveFailures = 0;
     try {
-      // Prefetch sequentially so tapping any lyric line becomes an instant disk read.
       for (int idx = 0; idx < buffer.chunkCount; idx++) {
         if (buffer.closed || !_streams.containsKey(id)) break;
         if (buffer.downloadedChunks[idx]) continue;
         final ok = await _ensureChunkCached(id, buffer, idx);
-        if (!ok) break;
+        if (ok) {
+          consecutiveFailures = 0;
+        } else {
+          consecutiveFailures++;
+          debugPrint(
+            '[LemielAudio] Prefetch chunk $idx/${buffer.chunkCount} failed for $id (failures=$consecutiveFailures)',
+          );
+          if (consecutiveFailures >= 3) break;
+          await Future<void>.delayed(Duration(milliseconds: 350 * consecutiveFailures));
+        }
       }
     } finally {
       _prefetching.remove(id);
@@ -235,14 +243,34 @@ class LocalAudioProxy {
     if (pending != null) return pending;
 
     final task = () async {
-      final stream = _streams[id];
-      if (stream == null || buffer.closed) return false;
       final start = chunkIndex * buffer.chunkSize;
       final end = min(start + buffer.chunkSize - 1, buffer.totalBytes - 1);
-      final bytes = await _fetchUpstreamRange(id, stream, start, end);
-      if (bytes == null || bytes.isEmpty || buffer.closed) return false;
-      await buffer.writeChunk(chunkIndex, bytes);
-      return true;
+      final expectedLen = end - start + 1;
+
+      for (int attempt = 0; attempt < 2; attempt++) {
+        final stream = _streams[id];
+        if (stream == null || buffer.closed) return false;
+
+        final result = await _fetchUpstreamRange(id, stream, start, end);
+        if (result.bytes != null &&
+            result.bytes!.length == expectedLen &&
+            !buffer.closed) {
+          await buffer.writeChunk(chunkIndex, result.bytes!);
+          return true;
+        }
+
+        // If upstream rejected with 403/410 (e.g. expired URL), try refreshing once.
+        if (attempt == 0 &&
+            (result.statusCode == 403 || result.statusCode == 410) &&
+            onRefreshStream != null) {
+          final refreshed = await _tryRefreshStream(id, expectedTotal: buffer.totalBytes);
+          if (refreshed != null) continue;
+        }
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 220));
+        }
+      }
+      return false;
     }();
 
     buffer.inFlight[chunkIndex] = task;
@@ -253,32 +281,76 @@ class LocalAudioProxy {
     }
   }
 
-  Future<Uint8List?> _fetchUpstreamRange(
+  Future<ResolvedAudioStream?> _tryRefreshStream(
+    String id, {
+    required int expectedTotal,
+  }) async {
+    final existing = _refreshing[id];
+    if (existing != null) return existing;
+
+    final task = () async {
+      try {
+        debugPrint('[LemielAudio] Refreshing upstream URL for $id after 403/410');
+        final fresh = await onRefreshStream?.call(id);
+        if (fresh != null && fresh.contentLength == expectedTotal) {
+          _streams[id] = fresh;
+          return fresh;
+        }
+        if (fresh != null) {
+          debugPrint(
+            '[LemielAudio] Refreshed URL contentLength mismatch for $id (${fresh.contentLength} != $expectedTotal)',
+          );
+        }
+      } catch (e) {
+        debugPrint('[LemielAudio] Refresh stream failed for $id: $e');
+      }
+      return null;
+    }();
+
+    _refreshing[id] = task;
+    try {
+      return await task;
+    } finally {
+      _refreshing.remove(id);
+    }
+  }
+
+  Future<({Uint8List? bytes, int? statusCode})> _fetchUpstreamRange(
     String id,
     ResolvedAudioStream stream,
     int start,
     int end,
   ) async {
     final client = _httpClient;
-    if (client == null) return null;
+    if (client == null) return (bytes: null, statusCode: null);
 
+    final expectedLen = end - start + 1;
     var activeUri = Uri.parse(stream.url);
     final candidates = _buildCandidateUris(activeUri);
+    int? lastStatus;
 
     for (final candidate in candidates) {
       try {
         final req = await client
             .getUrl(candidate)
-            .timeout(const Duration(seconds: 5));
+            .timeout(const Duration(seconds: 6));
         req.headers.set(HttpHeaders.userAgentHeader, stream.userAgent);
         req.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$end');
         req.headers.set(HttpHeaders.connectionHeader, 'keep-alive');
-        final res = await req.close().timeout(const Duration(seconds: 6));
+        final res = await req.close().timeout(const Duration(seconds: 8));
+        lastStatus = res.statusCode;
 
         if (res.statusCode == 200 || res.statusCode == 206) {
           final builder = BytesBuilder(copy: false);
-          await for (final chunk in res) {
+          await for (final chunk in res.timeout(const Duration(seconds: 10))) {
             builder.add(chunk);
+          }
+          final bytes = builder.takeBytes();
+          if (bytes.length != expectedLen) {
+            debugPrint(
+              '[LemielAudio] Truncated chunk for $id bytes=$start-$end (got ${bytes.length}/$expectedLen)',
+            );
+            continue;
           }
           if (candidate != activeUri) {
             activeUri = candidate;
@@ -289,12 +361,19 @@ class LocalAudioProxy {
               userAgent: stream.userAgent,
             );
           }
-          return builder.takeBytes();
+          return (bytes: bytes, statusCode: res.statusCode);
         }
+        debugPrint(
+          '[LemielAudio] Upstream HTTP ${res.statusCode} for $id range=$start-$end host=${candidate.host}',
+        );
         await res.drain<void>().catchError((_) {});
-      } catch (_) {}
+      } catch (e) {
+        debugPrint(
+          '[LemielAudio] Upstream error for $id range=$start-$end: $e',
+        );
+      }
     }
-    return null;
+    return (bytes: null, statusCode: lastStatus);
   }
 
   Future<void> _handleRequest(HttpRequest request) async {
@@ -367,8 +446,18 @@ class LocalAudioProxy {
 
       final buffer = _diskBuffers[id];
 
-      // Fast path: chunked disk-cached audio serving (sub-15ms seeks!).
+      // Fast path: chunked disk-cached serving (sub-15ms seeks).
       if (buffer != null && !buffer.closed) {
+        // Ensure the first chunk is fetched BEFORE sending 200/206 headers so
+        // an immediate upstream failure returns a clean 502 instead of a broken body.
+        final firstChunkIdx = start ~/ buffer.chunkSize;
+        final firstOk = await _ensureChunkCached(id, buffer, firstChunkIdx);
+        if (!firstOk) {
+          request.response.statusCode = HttpStatus.badGateway;
+          await request.response.close();
+          return;
+        }
+
         if (isPartial) {
           request.response.statusCode = HttpStatus.partialContent;
           request.response.headers.set(
@@ -382,6 +471,7 @@ class LocalAudioProxy {
         request.response.bufferOutput = false;
 
         int cursor = start;
+        int chunksSent = 0;
         while (cursor <= end && !clientClosed) {
           final chunkIdx = cursor ~/ buffer.chunkSize;
           final chunkBoundaryEnd =
@@ -393,11 +483,22 @@ class LocalAudioProxy {
           final data = await buffer.readRange(cursor, sliceLen);
           if (clientClosed) break;
           request.response.add(data);
+          chunksSent++;
+          // Flush every 2 chunks so AVPlayer backpressure keeps memory usage flat.
+          if (chunksSent % 2 == 0) {
+            await request.response.flush();
+          }
           cursor = chunkBoundaryEnd + 1;
         }
 
         if (!clientClosed) {
-          await request.response.close();
+          if (cursor <= end) {
+            // Abort socket cleanly rather than closing with mismatched Content-Length.
+            final socket = await request.response.detachSocket(writeHeaders: false);
+            socket.destroy();
+          } else {
+            await request.response.close();
+          }
         }
         return;
       }
@@ -408,7 +509,9 @@ class LocalAudioProxy {
       while (cursor <= end && !clientClosed) {
         final chunkEnd = min(cursor + (_chunkSize * 2) - 1, end);
         final activeStream = _streams[id] ?? stream;
-        final bytes = await _fetchUpstreamRange(id, activeStream, cursor, chunkEnd);
+        final result =
+            await _fetchUpstreamRange(id, activeStream, cursor, chunkEnd);
+        final bytes = result.bytes;
         if (bytes == null || bytes.isEmpty) {
           if (!headersSent) {
             request.response.statusCode = HttpStatus.badGateway;
@@ -431,12 +534,18 @@ class LocalAudioProxy {
         }
         if (!clientClosed) {
           request.response.add(bytes);
+          await request.response.flush();
         }
         cursor = chunkEnd + 1;
       }
 
       if (!clientClosed) {
-        await request.response.close();
+        if (headersSent && cursor <= end) {
+          final socket = await request.response.detachSocket(writeHeaders: false);
+          socket.destroy();
+        } else {
+          await request.response.close();
+        }
       }
     } catch (_) {
       try {

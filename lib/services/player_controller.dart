@@ -17,7 +17,7 @@ class PlayerController extends ChangeNotifier {
   final StorageService storage;
   final SettingsController settingsController;
   final AudioPlayer _player = AudioPlayer(useProxyForRequestHeaders: false);
-  final LocalAudioProxy _proxy = LocalAudioProxy();
+  late final LocalAudioProxy _proxy;
 
   List<Track> _queue = [];
   int _currentIndex = -1;
@@ -29,6 +29,8 @@ class PlayerController extends ChangeNotifier {
   String? _errorMessage;
   Duration _duration = Duration.zero;
   int _playSeq = 0;
+  int _recoveryAttemptsForTrack = 0;
+  bool _recovering = false;
 
   List<Track> _favorites = [];
   List<Track> _history = [];
@@ -45,7 +47,23 @@ class PlayerController extends ChangeNotifier {
     required this.ytm,
     required this.storage,
     required this.settingsController,
-  });
+  }) {
+    _proxy = LocalAudioProxy(
+      onRefreshStream: (id) async {
+        try {
+          ytm.invalidateStreamCache(id);
+          return await ytm.resolveAudioStream(
+            id,
+            quality: settingsController.settings.audioQuality,
+            forceRefresh: true,
+          );
+        } catch (e) {
+          debugPrint('[LemielAudio] Proxy refresh failed for $id: $e');
+          return null;
+        }
+      },
+    );
+  }
 
   List<Track> get queue => List.unmodifiable(_queue);
   int get currentIndex => _currentIndex;
@@ -61,7 +79,9 @@ class PlayerController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   Duration get duration => _duration;
   Stream<Duration> get positionStream => _player.positionStream;
+  Stream<Duration> get bufferedPositionStream => _player.bufferedPositionStream;
   Duration get currentPosition => _player.position;
+  Duration get bufferedPosition => _player.bufferedPosition;
 
   List<Track> get favorites => List.unmodifiable(_favorites);
   List<Track> get history => List.unmodifiable(_history);
@@ -92,6 +112,10 @@ class PlayerController extends ChangeNotifier {
       final buffering = state.processingState == ProcessingState.loading ||
           state.processingState == ProcessingState.buffering;
 
+      debugPrint(
+        '[LemielAudio] state=${state.processingState.name} playing=$playing pos=${_player.position.inSeconds}s buf=${_player.bufferedPosition.inSeconds}s dur=${_duration.inSeconds}s',
+      );
+
       if (state.processingState == ProcessingState.completed) {
         _onTrackCompleted();
         return;
@@ -112,6 +136,22 @@ class PlayerController extends ChangeNotifier {
     }));
 
     _subs.add(_player.errorStream.listen((err) {
+      final track = currentTrack;
+      final pos = _player.position;
+      debugPrint(
+        '[LemielAudio] AVPlayer error on ${track?.id} at ${pos.inSeconds}s: code=${err.code} msg=${err.message}',
+      );
+
+      // Single-shot mid-track recovery: if stream drops/expires mid-song, refresh
+      // URL once and resume at the exact timestamp without breaking Lock Screen.
+      if (track != null &&
+          !_recovering &&
+          _recoveryAttemptsForTrack < 1 &&
+          pos.inSeconds >= 3) {
+        unawaited(_recoverMidTrack(track, pos));
+        return;
+      }
+
       _isLoadingStream = false;
       _isBuffering = false;
       _isPlaying = false;
@@ -122,6 +162,49 @@ class PlayerController extends ChangeNotifier {
 
     _syncAudioLabSettings();
     notifyListeners();
+  }
+
+  Future<void> _recoverMidTrack(Track track, Duration resumeAt) async {
+    final seq = _playSeq;
+    _recovering = true;
+    _recoveryAttemptsForTrack++;
+    _isBuffering = true;
+    notifyListeners();
+
+    debugPrint(
+      '[LemielAudio] Attempting mid-track recovery for ${track.id} at ${resumeAt.inSeconds}s',
+    );
+    try {
+      ytm.invalidateStreamCache(track.id);
+      final fresh = await ytm.resolveAudioStream(
+        track.id,
+        quality: settingsController.settings.audioQuality,
+        forceRefresh: true,
+      );
+      if (seq != _playSeq) return;
+
+      final playUri = await _proxy.registerStream(track.id, fresh);
+      if (seq != _playSeq) return;
+
+      await _player.setAudioSource(
+        AudioSource.uri(playUri, tag: track.toMediaItem()),
+        initialPosition: resumeAt,
+      );
+      if (seq != _playSeq) return;
+
+      final s = settingsController.settings;
+      await _applySpeedAndPitch(s.playbackSpeed, s.playbackPitch);
+      await _player.play();
+    } catch (e) {
+      if (seq != _playSeq) return;
+      _isBuffering = false;
+      _isPlaying = false;
+      _errorMessage = 'Luồng nhạc bị gián đoạn. Nhấn phát để thử lại.';
+      debugPrint('[LemielAudio] Recovery failed for ${track.id}: $e');
+      notifyListeners();
+    } finally {
+      _recovering = false;
+    }
   }
 
   void _syncAudioLabSettings() {
@@ -137,9 +220,7 @@ class PlayerController extends ChangeNotifier {
       if ((_player.pitch - pitch).abs() > 0.01) {
         await _player.setPitch(pitch);
       }
-    } catch (_) {
-      // Some platforms do not support pitch shifting; keep speed working.
-    }
+    } catch (_) {}
   }
 
   void setSleepTimer(Duration duration) {
@@ -247,6 +328,7 @@ class PlayerController extends ChangeNotifier {
     if (track == null) return;
 
     final seq = ++_playSeq;
+    _recoveryAttemptsForTrack = 0;
     _errorMessage = null;
     _isLoadingStream = true;
     _duration = track.durationSeconds > 0
@@ -309,7 +391,9 @@ class PlayerController extends ChangeNotifier {
     if (_player.playing) {
       await _player.pause();
     } else {
-      if (_player.processingState == ProcessingState.idle && currentTrack != null) {
+      if ((_player.processingState == ProcessingState.idle ||
+              _errorMessage != null) &&
+          currentTrack != null) {
         await _startCurrentTrack();
       } else {
         await _player.play();

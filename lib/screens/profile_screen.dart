@@ -5,6 +5,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../models/app_settings.dart';
+import '../models/user_profile.dart';
 import '../services/player_controller.dart';
 import '../services/settings_controller.dart';
 import '../widgets/glass.dart';
@@ -108,7 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'HỒ SƠ CÁ NHÂN',
+                      'HỒ SƠ & CÀI ĐẶT',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.48),
                         fontSize: 11,
@@ -163,7 +165,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
 
-        // Interactive 1.89:1 Mochy-Style Personal ID Card
+        // Redesigned 1.89:1 Personal ID Card with vertical marquee & brushed silver/obsidian finish
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -173,6 +175,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 profile: profile,
                 accentColor: accent,
                 favoritesCount: widget.controller.favorites.length,
+                showEditHint: true,
+                onAvatarTap: () => showEditProfileSheet(
+                  context,
+                  widget.settingsController,
+                ),
                 onEditTap: () => showEditProfileSheet(
                   context,
                   widget.settingsController,
@@ -188,12 +195,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
             child: Center(
               child: Text(
-                'Vuốt nhẹ lên thẻ để xem hiệu ứng ánh sáng • Chạm góc trên để đổi Obsidian / Silver',
+                'Vuốt nhẹ lên thẻ để xem ánh sáng • Chạm ảnh hoặc góc trên để tuỳ chỉnh',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.44),
                   fontSize: 11,
                 ),
+              ),
+            ),
+          ),
+        ),
+
+        // Quick Theme Mode Switcher (Liquid Glass / Classic)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+            child: GlassSurface(
+              borderRadius: 20,
+              opacity: 0.10,
+              highQuality: settings.highGlass,
+              padding: const EdgeInsets.all(6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _ThemeToggleButton(
+                      label: 'Liquid Glass',
+                      icon: Icons.blur_on_rounded,
+                      active:
+                          settings.visualTheme == AppVisualTheme.liquidGlass,
+                      accent: accent,
+                      onTap: () => widget.settingsController
+                          .setVisualTheme(AppVisualTheme.liquidGlass),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _ThemeToggleButton(
+                      label: 'Classic',
+                      icon: Icons.layers_rounded,
+                      active: settings.visualTheme == AppVisualTheme.classic,
+                      accent: accent,
+                      onTap: () => widget.settingsController
+                          .setVisualTheme(AppVisualTheme.classic),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -249,9 +295,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 _ActionCard(
                   icon: Icons.palette_rounded,
-                  title: 'Tuỳ biến giao diện & Lời bài hát',
+                  title: 'Cài đặt giao diện & Lời bài hát',
                   subtitle:
-                      'Mẫu trình phát, Liquid Glass, hiệu ứng lời & nguồn cung lời',
+                      'Liquid Glass / Classic, mẫu trình phát, hiệu ứng lời & nguồn lời',
                   accent: accent,
                   highGlass: settings.highGlass,
                   onTap: _openCustomisation,
@@ -351,7 +397,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
 
-        // Mochy-style About & Developer Social Card
+        // About & Developer Social Card
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -402,7 +448,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                                 SizedBox(width: 7),
                                 Text(
-                                  'v2.0.1',
+                                  'v2.1.0',
                                   style: TextStyle(
                                     color: Colors.white54,
                                     fontSize: 11.5,
@@ -472,6 +518,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SliverToBoxAdapter(child: SizedBox(height: 170)),
       ],
+    );
+  }
+}
+
+class _ThemeToggleButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool active;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _ThemeToggleButton({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SpringTap(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: active ? accent.withValues(alpha: 0.28) : Colors.transparent,
+          border: Border.all(
+            color: active ? accent.withValues(alpha: 0.65) : Colors.transparent,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 17, color: active ? Colors.white : Colors.white60),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? Colors.white : Colors.white60,
+                fontSize: 13,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -648,8 +743,7 @@ class _SocialButton extends StatelessWidget {
   }
 }
 
-/// Opens the Mochy-style local profile editor (Name, Bio, iPhone Photos Avatar).
-/// Also used on first launch so the user can personalize their Lemiel Pass right away.
+/// Local profile & avatar editor sheet (supports photo library + 6 monogram gradients).
 Future<void> showEditProfileSheet(
   BuildContext context,
   SettingsController settingsController, {
@@ -663,6 +757,7 @@ Future<void> showEditProfileSheet(
   );
   final bioCtrl = TextEditingController(text: initial.bio);
   String? avatarPath = initial.avatarPath;
+  int avatarPreset = initial.avatarPresetIndex;
   bool silver = initial.silverCard;
   final accent = settingsController.settings.accentColor;
 
@@ -702,6 +797,7 @@ Future<void> showEditProfileSheet(
                 : initial.bio,
             avatarPath: avatarPath,
             clearAvatar: avatarPath == null,
+            avatarPresetIndex: avatarPreset,
             silverCard: silver,
           );
 
@@ -714,6 +810,7 @@ Future<void> showEditProfileSheet(
               blur: 28,
               opacity: 0.22,
               tintColor: const Color(0xFF14141E),
+              isLens: true,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 26),
               child: SingleChildScrollView(
                 child: Column(
@@ -731,12 +828,10 @@ Future<void> showEditProfileSheet(
                       ),
                     ),
                     const SizedBox(height: 14),
-                    Text(
-                      isOnboarding
-                          ? 'Chào mừng đến Lemielmusic'
-                          : 'Tuỳ chỉnh Thẻ Cá Nhân',
+                    const Text(
+                      'Tuỳ chỉnh Thẻ Cá Nhân',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
@@ -744,30 +839,30 @@ Future<void> showEditProfileSheet(
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'Lưu hoàn toàn trên máy của bạn • Không cần mật khẩu',
+                      'Lưu cục bộ trên thiết bị • Chạm vào ảnh trên thẻ để chọn ảnh',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white60, fontSize: 12),
                     ),
                     const SizedBox(height: 16),
 
-                    // Live miniature ID card preview
                     ProfileIdCard(
                       profile: previewProfile,
                       accentColor: accent,
                       favoritesCount: 0,
+                      showEditHint: true,
+                      onAvatarTap: pickAvatar,
                       onToggleFinish: () => setModalState(() => silver = !silver),
                     ),
                     const SizedBox(height: 16),
 
-                    // Avatar Picker Row
+                    // Photo picker + 6 monogram gradient swatches
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         SpringTap(
                           onTap: pickAvatar,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
+                              horizontal: 13,
                               vertical: 9,
                             ),
                             decoration: BoxDecoration(
@@ -782,15 +877,15 @@ Future<void> showEditProfileSheet(
                               children: [
                                 Icon(
                                   Icons.photo_library_rounded,
-                                  size: 17,
+                                  size: 16,
                                   color: Colors.white,
                                 ),
                                 SizedBox(width: 6),
                                 Text(
-                                  'Chọn ảnh đại diện',
+                                  'Ảnh từ máy',
                                   style: TextStyle(
                                     color: Colors.white,
-                                    fontSize: 13,
+                                    fontSize: 12.5,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -798,17 +893,57 @@ Future<void> showEditProfileSheet(
                             ),
                           ),
                         ),
-                        if (avatarPath != null) ...[
-                          const SizedBox(width: 10),
-                          TextButton(
-                            onPressed: () =>
-                                setModalState(() => avatarPath = null),
-                            child: const Text(
-                              'Dùng chữ cái',
-                              style: TextStyle(color: Colors.white70),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 34,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: UserProfile.avatarGradients.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(width: 8),
+                              itemBuilder: (_, idx) {
+                                final grad = idx == 0
+                                    ? [
+                                        accent,
+                                        Color.lerp(
+                                          accent,
+                                          const Color(0xFF5E5CE6),
+                                          0.55,
+                                        )!,
+                                      ]
+                                    : UserProfile.avatarGradients[idx];
+                                final active =
+                                    avatarPath == null && avatarPreset == idx;
+                                return GestureDetector(
+                                  onTap: () => setModalState(() {
+                                    avatarPath = null;
+                                    avatarPreset = idx;
+                                  }),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 160),
+                                    width: 30,
+                                    height: 30,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: grad,
+                                      ),
+                                      border: Border.all(
+                                        color: active
+                                            ? Colors.white
+                                            : Colors.white24,
+                                        width: active ? 2.4 : 1,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ),
-                        ],
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),
@@ -864,6 +999,7 @@ Future<void> showEditProfileSheet(
                             bio: finalBio,
                             avatarPath: avatarPath,
                             clearAvatar: avatarPath == null,
+                            avatarPresetIndex: avatarPreset,
                             silverCard: silver,
                             onboardingDone: true,
                           ),
@@ -877,9 +1013,9 @@ Future<void> showEditProfileSheet(
                           color: accent,
                         ),
                         alignment: Alignment.center,
-                        child: Text(
-                          isOnboarding ? 'Bắt đầu nghe nhạc' : 'Lưu thẻ cá nhân',
-                          style: const TextStyle(
+                        child: const Text(
+                          'Lưu thẻ cá nhân',
+                          style: TextStyle(
                             color: Colors.white,
                             fontSize: 15,
                             fontWeight: FontWeight.w800,

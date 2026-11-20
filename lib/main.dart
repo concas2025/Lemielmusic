@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'screens/home_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/now_playing_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/search_screen.dart';
 import 'services/import_service.dart';
@@ -13,6 +14,7 @@ import 'services/player_controller.dart';
 import 'services/settings_controller.dart';
 import 'services/storage_service.dart';
 import 'services/ytm_service.dart';
+import 'theme/lemiel_theme.dart';
 import 'widgets/glass.dart';
 import 'widgets/liquid_dock.dart';
 import 'widgets/mini_player.dart';
@@ -105,26 +107,40 @@ class _LemielmusicAppState extends State<LemielmusicApp> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.settingsController.settings.accentColor;
+    final settings = widget.settingsController.settings;
+    final lemielTheme = LemielTheme.fromSettings(settings);
+    final showOnboarding = !widget.settingsController.profile.onboardingDone;
 
     return MaterialApp(
       title: 'Lemielmusic',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF06060A),
+        scaffoldBackgroundColor: lemielTheme.canvas,
         colorScheme: ColorScheme.dark(
-          primary: accent,
-          surface: const Color(0xFF14141C),
+          primary: settings.accentColor,
+          surface: lemielTheme.surface,
         ),
         useMaterial3: true,
+        extensions: [lemielTheme],
       ),
-      home: _MainShell(
-        controller: widget.controller,
-        settingsController: widget.settingsController,
-        ytm: widget.ytm,
-        lyrics: widget.lyrics,
-        importService: widget.importService,
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 360),
+        switchInCurve: Curves.easeOutCubic,
+        child: showOnboarding
+            ? OnboardingScreen(
+                key: const ValueKey('onboarding'),
+                settingsController: widget.settingsController,
+                onComplete: () => setState(() {}),
+              )
+            : _MainShell(
+                key: const ValueKey('main_shell'),
+                controller: widget.controller,
+                settingsController: widget.settingsController,
+                ytm: widget.ytm,
+                lyrics: widget.lyrics,
+                importService: widget.importService,
+              ),
       ),
     );
   }
@@ -138,6 +154,7 @@ class _MainShell extends StatefulWidget {
   final ImportService importService;
 
   const _MainShell({
+    super.key,
     required this.controller,
     required this.settingsController,
     required this.ytm,
@@ -151,7 +168,6 @@ class _MainShell extends StatefulWidget {
 
 class _MainShellState extends State<_MainShell> {
   int _tabIndex = 0; // 0 = Home, 1 = Library, 2 = Profile, 3 = Search Orb
-  bool _onboardingPrompted = false;
 
   static const _dockItems = [
     LiquidDockItem(icon: Icons.explore_rounded, label: 'Khám phá'),
@@ -164,19 +180,6 @@ class _MainShellState extends State<_MainShell> {
     super.initState();
     widget.controller.addListener(_onChanged);
     widget.settingsController.addListener(_onChanged);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_onboardingPrompted &&
-          !widget.settingsController.profile.onboardingDone &&
-          mounted) {
-        _onboardingPrompted = true;
-        showEditProfileSheet(
-          context,
-          widget.settingsController,
-          isOnboarding: true,
-        );
-      }
-    });
   }
 
   @override
@@ -190,12 +193,14 @@ class _MainShellState extends State<_MainShell> {
     if (mounted) setState(() {});
   }
 
+  /// Coordinated Mini Player -> Now Playing Hero + subtle scale/slide transition.
   void _openNowPlaying() {
     Navigator.of(context).push(
       PageRouteBuilder<void>(
-        opaque: true,
-        transitionDuration: const Duration(milliseconds: 360),
-        reverseTransitionDuration: const Duration(milliseconds: 280),
+        opaque: false,
+        barrierColor: Colors.black.withValues(alpha: 0.45),
+        transitionDuration: const Duration(milliseconds: 380),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (_, _, _) => NowPlayingScreen(
           controller: widget.controller,
           lyricsService: widget.lyrics,
@@ -207,12 +212,23 @@ class _MainShellState extends State<_MainShell> {
             curve: Curves.easeOutCubic,
             reverseCurve: Curves.easeInCubic,
           );
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(curve),
-            child: child,
+          return FadeTransition(
+            opacity: Tween<double>(begin: 0.0, end: 1.0).animate(
+              CurvedAnimation(
+                parent: animation,
+                curve: const Interval(0.0, 0.55, curve: Curves.easeOut),
+              ),
+            ),
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.14),
+                end: Offset.zero,
+              ).animate(curve),
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.96, end: 1.0).animate(curve),
+                child: child,
+              ),
+            ),
           );
         },
       ),
@@ -263,7 +279,7 @@ class _MainShellState extends State<_MainShell> {
               ),
             ),
 
-            // Floating Error Banner + Mini Player + iOS 26/BitChord Liquid Glass Dock
+            // Floating Error Banner + Mini Player + Adaptive Dock
             Positioned(
               left: 0,
               right: 0,

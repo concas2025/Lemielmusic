@@ -3,9 +3,10 @@ import 'package:material_ui/material_ui.dart';
 import '../models/app_settings.dart';
 
 /// Customizable Seek Bar supporting Apple Slim, Mochy Wavy (animated wave),
-/// and Liquid Pill styles.
+/// and Liquid Pill styles with buffered progress indicator.
 class CustomMusicSlider extends StatefulWidget {
   final double value; // 0.0..1.0
+  final double bufferedValue; // 0.0..1.0
   final bool isPlaying;
   final SliderStyle style;
   final Color accentColor;
@@ -15,6 +16,7 @@ class CustomMusicSlider extends StatefulWidget {
   const CustomMusicSlider({
     super.key,
     required this.value,
+    this.bufferedValue = 0.0,
     required this.isPlaying,
     required this.style,
     required this.accentColor,
@@ -66,6 +68,7 @@ class _CustomMusicSliderState extends State<CustomMusicSlider>
   @override
   Widget build(BuildContext context) {
     final progress = widget.value.clamp(0.0, 1.0);
+    final buffered = widget.bufferedValue.clamp(progress, 1.0);
 
     if (widget.style == SliderStyle.appleSlim) {
       return SliderTheme(
@@ -76,11 +79,13 @@ class _CustomMusicSliderState extends State<CustomMusicSlider>
           ),
           overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
           activeTrackColor: Colors.white,
-          inactiveTrackColor: Colors.white.withValues(alpha: 0.20),
+          secondaryActiveTrackColor: Colors.white.withValues(alpha: 0.34),
+          inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
           thumbColor: Colors.white,
         ),
         child: Slider(
           value: progress,
+          secondaryTrackValue: buffered,
           onChangeStart: (_) => setState(() => _dragging = true),
           onChanged: widget.onChanged,
           onChangeEnd: (v) {
@@ -121,13 +126,15 @@ class _CustomMusicSliderState extends State<CustomMusicSlider>
                 painter: widget.style == SliderStyle.mochyWavy
                     ? _MochyWavePainter(
                         progress: progress,
+                        buffered: buffered,
                         phase: _waveCtrl.value * 2 * math.pi,
-                        amplitude: widget.isPlaying && !_dragging ? 3.2 : 0.6,
+                        amplitude: widget.isPlaying && !_dragging ? 3.0 : 0.5,
                         accentColor: widget.accentColor,
                         dragging: _dragging,
                       )
                     : _LiquidPillSliderPainter(
                         progress: progress,
+                        buffered: buffered,
                         accentColor: widget.accentColor,
                         dragging: _dragging,
                       ),
@@ -142,6 +149,7 @@ class _CustomMusicSliderState extends State<CustomMusicSlider>
 
 class _MochyWavePainter extends CustomPainter {
   final double progress;
+  final double buffered;
   final double phase;
   final double amplitude;
   final Color accentColor;
@@ -149,6 +157,7 @@ class _MochyWavePainter extends CustomPainter {
 
   _MochyWavePainter({
     required this.progress,
+    required this.buffered,
     required this.phase,
     required this.amplitude,
     required this.accentColor,
@@ -159,17 +168,29 @@ class _MochyWavePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cy = size.height / 2;
     final activeX = (size.width * progress).clamp(0.0, size.width);
+    final bufX = (size.width * buffered).clamp(activeX, size.width);
 
-    // Inactive straight track
-    final inactivePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.22)
-      ..strokeWidth = 3.2
-      ..strokeCap = StrokeCap.round;
+    // Base inactive track
     if (activeX < size.width) {
       canvas.drawLine(
         Offset(activeX, cy),
         Offset(size.width, cy),
-        inactivePaint,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.16)
+          ..strokeWidth = 3.2
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+
+    // Buffered ahead track
+    if (bufX > activeX + 2) {
+      canvas.drawLine(
+        Offset(activeX, cy),
+        Offset(bufX, cy),
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.34)
+          ..strokeWidth = 3.2
+          ..strokeCap = StrokeCap.round,
       );
     }
 
@@ -189,14 +210,14 @@ class _MochyWavePainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..shader = LinearGradient(
           colors: [
-            Colors.white.withValues(alpha: 0.92),
+            Colors.white.withValues(alpha: 0.94),
             accentColor,
           ],
         ).createShader(Rect.fromLTWH(0, 0, activeX, size.height));
       canvas.drawPath(path, activePaint);
     }
 
-    // Vertical pill thumb (Mochy signature)
+    // Vertical pill thumb
     final thumbRect = RRect.fromRectAndRadius(
       Rect.fromCenter(
         center: Offset(activeX.clamp(4.0, size.width - 4.0), cy),
@@ -205,15 +226,13 @@ class _MochyWavePainter extends CustomPainter {
       ),
       const Radius.circular(4),
     );
-    canvas.drawRRect(
-      thumbRect,
-      Paint()..color = Colors.white,
-    );
+    canvas.drawRRect(thumbRect, Paint()..color = Colors.white);
   }
 
   @override
   bool shouldRepaint(covariant _MochyWavePainter old) =>
       old.progress != progress ||
+      old.buffered != buffered ||
       old.phase != phase ||
       old.amplitude != amplitude ||
       old.dragging != dragging ||
@@ -222,11 +241,13 @@ class _MochyWavePainter extends CustomPainter {
 
 class _LiquidPillSliderPainter extends CustomPainter {
   final double progress;
+  final double buffered;
   final Color accentColor;
   final bool dragging;
 
   _LiquidPillSliderPainter({
     required this.progress,
+    required this.buffered,
     required this.accentColor,
     required this.dragging,
   });
@@ -241,7 +262,15 @@ class _LiquidPillSliderPainter extends CustomPainter {
       Rect.fromCenter(center: Offset(size.width / 2, cy), width: size.width, height: h),
       r,
     );
-    canvas.drawRRect(bgRect, Paint()..color = Colors.white.withValues(alpha: 0.16));
+    canvas.drawRRect(bgRect, Paint()..color = Colors.white.withValues(alpha: 0.14));
+
+    if (buffered > progress) {
+      final bufW = (size.width * buffered).clamp(h, size.width);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromLTWH(0, cy - h / 2, bufW, h), r),
+        Paint()..color = Colors.white.withValues(alpha: 0.16),
+      );
+    }
 
     final activeW = (size.width * progress).clamp(h, size.width);
     final fgRect = RRect.fromRectAndRadius(
@@ -251,25 +280,25 @@ class _LiquidPillSliderPainter extends CustomPainter {
     final fgPaint = Paint()
       ..shader = LinearGradient(
         colors: [
-          accentColor.withValues(alpha: 0.85),
+          accentColor.withValues(alpha: 0.88),
           Colors.white.withValues(alpha: 0.95),
         ],
       ).createShader(fgRect.outerRect);
     canvas.drawRRect(fgRect, fgPaint);
 
-    // Subtle specular border around capsule
     canvas.drawRRect(
       bgRect,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 0.8
-        ..color = Colors.white.withValues(alpha: 0.28),
+        ..color = Colors.white.withValues(alpha: 0.24),
     );
   }
 
   @override
   bool shouldRepaint(covariant _LiquidPillSliderPainter old) =>
       old.progress != progress ||
+      old.buffered != buffered ||
       old.dragging != dragging ||
       old.accentColor != accentColor;
 }

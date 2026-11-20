@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+enum AppVisualTheme { liquidGlass, classic }
+
 enum PlayerStyle { flagship, vinyl, edgeToEdge }
 
 enum PlayerBackgroundStyle { ambientGlow, appleBlur, darkGradient, oledBlack }
@@ -50,6 +52,7 @@ class AppSettings {
     'Late Night': [-3, 2, 3, 1, -2],
   };
 
+  final AppVisualTheme visualTheme;
   final PlayerStyle playerStyle;
   final PlayerBackgroundStyle backgroundStyle;
   final SliderStyle sliderStyle;
@@ -68,6 +71,7 @@ class AppSettings {
   final List<double> eqBands;
 
   const AppSettings({
+    this.visualTheme = AppVisualTheme.liquidGlass,
     this.playerStyle = PlayerStyle.flagship,
     this.backgroundStyle = PlayerBackgroundStyle.ambientGlow,
     this.sliderStyle = SliderStyle.mochyWavy,
@@ -87,13 +91,17 @@ class AppSettings {
   });
 
   Color get accentColor => accentPreset.color;
-  bool get highGlass => glassQuality == GlassQuality.high;
+  bool get isClassic => visualTheme == AppVisualTheme.classic;
+  bool get highGlass =>
+      visualTheme == AppVisualTheme.liquidGlass &&
+      glassQuality == GlassQuality.high;
 
   List<String> get activeLyricsProviders => lyricsProviderOrder
       .where((p) => enabledLyricsProviders.contains(p))
       .toList(growable: false);
 
   AppSettings copyWith({
+    AppVisualTheme? visualTheme,
     PlayerStyle? playerStyle,
     PlayerBackgroundStyle? backgroundStyle,
     SliderStyle? sliderStyle,
@@ -112,6 +120,7 @@ class AppSettings {
     List<double>? eqBands,
   }) {
     return AppSettings(
+      visualTheme: visualTheme ?? this.visualTheme,
       playerStyle: playerStyle ?? this.playerStyle,
       backgroundStyle: backgroundStyle ?? this.backgroundStyle,
       sliderStyle: sliderStyle ?? this.sliderStyle,
@@ -133,6 +142,7 @@ class AppSettings {
   }
 
   Map<String, dynamic> toJson() => {
+        'visualTheme': visualTheme.name,
         'playerStyle': playerStyle.name,
         'backgroundStyle': backgroundStyle.name,
         'sliderStyle': sliderStyle.name,
@@ -181,6 +191,11 @@ class AppSettings {
         const [0.0, 0.0, 0.0, 0.0, 0.0];
 
     return AppSettings(
+      visualTheme: enumByName(
+        AppVisualTheme.values,
+        json['visualTheme'] as String?,
+        AppVisualTheme.liquidGlass,
+      ),
       playerStyle: enumByName(
         PlayerStyle.values,
         json['playerStyle'] as String?,

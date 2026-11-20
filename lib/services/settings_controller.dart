@@ -27,6 +27,9 @@ class SettingsController extends ChangeNotifier {
     unawaited(storage.saveSettings(next));
   }
 
+  void setVisualTheme(AppVisualTheme theme) =>
+      updateSettings(_settings.copyWith(visualTheme: theme));
+
   void setPlayerStyle(PlayerStyle style) =>
       updateSettings(_settings.copyWith(playerStyle: style));
 
