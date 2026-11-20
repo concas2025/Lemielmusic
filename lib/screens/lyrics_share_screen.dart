@@ -59,7 +59,7 @@ class _LyricsShareScreenState extends State<LyricsShareScreen> {
   late final Set<int> _selectedIndices;
   bool _pickingLines = false;
   _CardBgStyle _bgStyle = _CardBgStyle.gradient;
-  int _paletteIdx = 0;
+  int _paletteIdx = 4; // Obsidian monochrome default
   LyricsAlign _align = LyricsAlign.left;
   bool _storyRatio = false; // false = 1:1 Post, true = 9:16 Story
   bool _showWatermark = true;
@@ -148,9 +148,11 @@ class _LyricsShareScreenState extends State<LyricsShareScreen> {
   @override
   Widget build(BuildContext context) {
     final accent = widget.accentColor;
+    final onAccent =
+        accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF06060A),
+      backgroundColor: Colors.black,
       body: AmbientBackground(
         artworkUrl: widget.track.artworkUrl,
         accentColor: accent,
@@ -226,36 +228,24 @@ class _LyricsShareScreenState extends State<LyricsShareScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(20),
-                      gradient: LinearGradient(
-                        colors: [
-                          accent,
-                          Color.lerp(accent, const Color(0xFF5E5CE6), 0.35)!,
-                        ],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accent.withValues(alpha: 0.38),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
+                      color: accent,
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         if (_exporting)
-                          const SizedBox(
+                          SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2.2,
-                              color: Colors.white,
+                              color: onAccent,
                             ),
                           )
                         else
-                          const Icon(
+                          Icon(
                             Icons.ios_share_rounded,
-                            color: Colors.white,
+                            color: onAccent,
                             size: 20,
                           ),
                         const SizedBox(width: 8),
@@ -263,8 +253,8 @@ class _LyricsShareScreenState extends State<LyricsShareScreen> {
                           _exporting
                               ? 'Đang xuất ảnh chất lượng cao...'
                               : 'Chia sẻ lên Story / IG / FB / TikTok',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: onAccent,
                             fontSize: 14.5,
                             fontWeight: FontWeight.w800,
                           ),
@@ -718,6 +708,8 @@ class _StudioChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onAccent =
+        accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
     return SpringTap(
       onTap: onTap,
       child: AnimatedContainer(
@@ -725,15 +717,12 @@ class _StudioChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          color: selected
-              ? accent.withValues(alpha: 0.30)
-              : Colors.white.withValues(alpha: 0.08),
-          border: Border.all(color: selected ? accent : Colors.white12),
+          color: selected ? accent : const Color(0xFF1C1C20),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? Colors.white : Colors.white70,
+            color: selected ? onAccent : Colors.white70,
             fontSize: 12,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           ),

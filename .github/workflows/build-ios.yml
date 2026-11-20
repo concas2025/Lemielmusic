@@ -1,8 +1,8 @@
-name: Build Lemielmusic iOS IPA
+name: Build Lemielmusicv2 iOS IPA
 
 on:
   push:
-    tags: ['v*']
+    tags: ['Lemielmusicv2*']
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-ios:
-    name: Build Unsigned iOS IPA
+    name: Build Unsigned Lemielmusicv2 iOS IPA
     runs-on: macos-latest
 
     steps:
@@ -42,21 +42,29 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
           cd build/ipa
-          zip -r -y ../../Lemielmusic.ipa Payload
+          zip -r -y ../../Lemielmusicv2.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Lemielmusic-ios-unsigned
-          path: Lemielmusic.ipa
+          name: Lemielmusicv2-ios-unsigned
+          path: Lemielmusicv2.ipa
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/Lemielmusicv2') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
-          name: Lemielmusic ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/Lemielmusicv2') && github.ref_name || 'Lemielmusicv2' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/Lemielmusicv2') && github.ref_name || 'Lemielmusicv2' }}
+          prerelease: true
           body: |
-            Bản dựng **Lemielmusic (Unsigned IPA)** dành cho iOS.
-            Tải file `Lemielmusic.ipa` bên dưới và cài lên iPhone bằng **SideStore**, **AltStore**, **Sideloadly** hoặc **TrollStore**.
-          files: Lemielmusic.ipa
+            Bản dựng riêng **Lemielmusicv2 (Redesign Kiểu A — Unsigned IPA)** cài **song song** trên iPhone cùng `Lemielmusic v2.1.0` (Bundle ID riêng `com.lemiel.lemielmusic.v2`, không ghi đè bản `v2.1.0`).
+
+            ### Điểm nổi bật của Lemielmusicv2
+            - **Phối màu Đen OLED `#000000` + đơn sắc Trắng Obsidian**: bỏ tông đỏ mặc định, để màu sắc đến tự nhiên từ bìa nhạc thật.
+            - **Trang chủ + Floating Liquid Glass Dock + Search Orb** theo ngôn ngữ **BitChord**.
+            - **Now Playing tràn viền trích màu bìa nhạc thật + Lyrics đồng bộ không viền + Thẻ ID Hồ sơ + Audio Lab** theo ngôn ngữ **Mochy Music** (100% thương hiệu Lemielmusic).
+            - Giữ trọn bản sửa lỗi đứng nhạc sau 1:30 của `v2.1.0`, chế độ **Liquid Glass / Classic**, phát nền & Lock Screen.
+
+            Tải file **`Lemielmusicv2.ipa`** bên dưới và cài lên iPhone bằng **SideStore**, **AltStore**, **Sideloadly** hoặc **TrollStore**.
+          files: Lemielmusicv2.ipa

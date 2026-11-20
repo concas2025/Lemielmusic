@@ -28,13 +28,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget build(BuildContext context) {
     final settings = widget.settingsController.settings;
     final accent = settings.accentColor;
+    final onAccent = settings.onAccentColor;
     final current = widget.controller.currentTrack;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
           child: Row(
             children: [
               const Expanded(
@@ -42,9 +43,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   'Thư viện',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 28,
+                    fontSize: 32,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -0.7,
+                    letterSpacing: -0.9,
                   ),
                 ),
               ),
@@ -55,21 +56,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   importService: widget.importService,
                   accentColor: accent,
                 ),
-                child: GlassSurface(
-                  borderRadius: 18,
-                  opacity: 0.24,
-                  tintColor: accent,
-                  highQuality: settings.highGlass,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: const Row(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    color: accent,
+                  ),
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.download_rounded, size: 17, color: Colors.white),
-                      SizedBox(width: 5),
+                      Icon(Icons.download_rounded, size: 16, color: onAccent),
+                      const SizedBox(width: 5),
                       Text(
                         'Nhập nhạc',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: onAccent,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
                         ),
@@ -80,12 +81,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
               const SizedBox(width: 8),
               SpringTap(
-                onTap: () => _showCreatePlaylistDialog(context, accent),
-                child: GlassSurface(
-                  borderRadius: 18,
-                  opacity: 0.12,
-                  highQuality: settings.highGlass,
-                  padding: const EdgeInsets.all(8),
+                onTap: () => _showCreatePlaylistDialog(context, accent, onAccent),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFF1C1C1E),
+                  ),
                   child: const Icon(Icons.add_rounded, size: 20, color: Colors.white),
                 ),
               ),
@@ -166,14 +169,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   height: 46,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    gradient: LinearGradient(
-                      colors: [accent, const Color(0xFF5E5CE6)],
-                    ),
+                    color: const Color(0xFF26262B),
                   ),
                   child: const Icon(
                     Icons.cloud_download_rounded,
                     color: Colors.white,
-                    size: 24,
+                    size: 23,
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -358,17 +359,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    color: accent.withValues(alpha: 0.28),
+                    color: accent,
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.play_arrow_rounded, size: 16, color: Colors.white),
-                      SizedBox(width: 3),
+                      Icon(
+                        Icons.play_arrow_rounded,
+                        size: 16,
+                        color: accent.computeLuminance() > 0.55
+                            ? Colors.black
+                            : Colors.white,
+                      ),
+                      const SizedBox(width: 3),
                       Text(
                         'Phát tất cả',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: accent.computeLuminance() > 0.55
+                              ? Colors.black
+                              : Colors.white,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                         ),
@@ -411,6 +420,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Widget _buildSegment(String label, int index, Color accent) {
     final active = _tab == index;
+    final onAccent = accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _tab = index),
@@ -419,7 +429,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           padding: const EdgeInsets.symmetric(vertical: 9),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(13),
-            color: active ? accent.withValues(alpha: 0.32) : Colors.transparent,
+            color: active ? accent : Colors.transparent,
           ),
           alignment: Alignment.center,
           child: Text(
@@ -427,7 +437,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: active ? Colors.white : Colors.white.withValues(alpha: 0.62),
+              color: active ? onAccent : const Color(0xFF8E8E93),
               fontSize: 12.5,
               fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             ),
@@ -437,7 +447,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Future<void> _showCreatePlaylistDialog(BuildContext context, Color accent) async {
+  Future<void> _showCreatePlaylistDialog(
+    BuildContext context,
+    Color accent,
+    Color onAccent,
+  ) async {
     final ctrl = TextEditingController();
     await showModalBottomSheet<void>(
       context: context,
@@ -492,10 +506,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     color: accent,
                   ),
                   alignment: Alignment.center,
-                  child: const Text(
+                  child: Text(
                     'Tạo Playlist',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: onAccent,
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
                     ),
@@ -555,7 +569,7 @@ class _PlaylistDetailScreenState extends State<_PlaylistDetailScreen> {
     final current = widget.controller.currentTrack;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF06060A),
+      backgroundColor: Colors.black,
       body: AmbientBackground(
         artworkUrl: pl.tracks.isNotEmpty ? pl.tracks.first.artworkUrl : null,
         accentColor: accent,
@@ -626,15 +640,18 @@ class _PlaylistDetailScreenState extends State<_PlaylistDetailScreen> {
                         borderRadius: BorderRadius.circular(18),
                         color: accent,
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.play_arrow_rounded, color: Colors.white),
-                          SizedBox(width: 6),
+                          Icon(
+                            Icons.play_arrow_rounded,
+                            color: settings.onAccentColor,
+                          ),
+                          const SizedBox(width: 6),
                           Text(
                             'Phát toàn bộ Playlist',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: settings.onAccentColor,
                               fontWeight: FontWeight.w800,
                               fontSize: 14.5,
                             ),
@@ -867,14 +884,16 @@ Future<void> showImportPlaylistSheet(
                           : accentColor,
                     ),
                     alignment: Alignment.center,
-                    child: Text(
-                      importing ? 'Đang nhập playlist...' : 'Bắt đầu nhập ngay',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                      child: Text(
+                        importing ? 'Đang nhập playlist...' : 'Bắt đầu nhập ngay',
+                        style: TextStyle(
+                          color: accentColor.computeLuminance() > 0.55
+                              ? Colors.black
+                              : Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
                   ),
                 ),
               ],

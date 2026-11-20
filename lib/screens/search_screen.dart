@@ -7,6 +7,9 @@ import '../services/ytm_service.dart';
 import '../widgets/glass.dart';
 import 'library_screen.dart';
 
+/// BitChord monochrome editorial Search Screen:
+/// Pure black #000000 canvas, smoked Liquid Glass pill search bar, clean
+/// history rows with north-west autofill arrow, borderless track results.
 class SearchScreen extends StatefulWidget {
   final PlayerController controller;
   final SettingsController settingsController;
@@ -94,43 +97,40 @@ class _SearchScreenState extends State<SearchScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
-          padding: EdgeInsets.fromLTRB(20, 14, 20, 10),
+          padding: EdgeInsets.fromLTRB(20, 14, 20, 12),
           child: Text(
             'Tìm kiếm',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 28,
+              fontSize: 32,
               fontWeight: FontWeight.w800,
-              letterSpacing: -0.7,
+              letterSpacing: -0.9,
             ),
           ),
         ),
-        // Liquid Glass Lens Search Capsule (BitChord / iOS 26 style)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: GlassSurface(
             borderRadius: 24,
             blur: 22,
-            opacity: 0.14,
             isLens: true,
             highQuality: settings.highGlass,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
             child: TextField(
               controller: _textCtrl,
               onChanged: _onQueryChanged,
               onSubmitted: (q) => _runSearch(q, saveHistory: true),
               style: const TextStyle(color: Colors.white, fontSize: 15),
-              cursorColor: accent,
+              cursorColor: Colors.white,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 border: InputBorder.none,
-                hintText: 'Tên bài hát, nghệ sĩ, lời nhạc...',
-                hintStyle: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.45),
-                ),
-                icon: Icon(
+                hintText: 'Bài hát, nghệ sĩ, album...',
+                hintStyle: const TextStyle(color: Color(0xFF8E8E93)),
+                icon: const Icon(
                   Icons.search_rounded,
-                  color: accent.withValues(alpha: 0.9),
+                  color: Color(0xFF8E8E93),
+                  size: 21,
                 ),
                 suffixIcon: _textCtrl.text.isNotEmpty
                     ? IconButton(
@@ -138,9 +138,9 @@ class _SearchScreenState extends State<SearchScreen> {
                           _textCtrl.clear();
                           _onQueryChanged('');
                         },
-                        icon: Icon(
+                        icon: const Icon(
                           Icons.close_rounded,
-                          color: Colors.white.withValues(alpha: 0.65),
+                          color: Color(0xFF8E8E93),
                           size: 19,
                         ),
                       )
@@ -152,31 +152,32 @@ class _SearchScreenState extends State<SearchScreen> {
         const SizedBox(height: 12),
         Expanded(
           child: _loading
-              ? Center(child: CircularProgressIndicator(color: accent))
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.2,
+                  ),
+                )
               : _error != null
                   ? Center(
                       child: Text(
                         _error!,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.65),
-                        ),
+                        style: const TextStyle(color: Color(0xFF8E8E93)),
                       ),
                     )
                   : _textCtrl.text.trim().isEmpty
-                      ? _buildSearchHistory(history, settings.highGlass)
+                      ? _buildSearchHistory(history)
                       : _results.isEmpty
-                          ? Center(
+                          ? const Center(
                               child: Text(
                                 'Không tìm thấy kết quả phù hợp.',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.55),
-                                ),
+                                style: TextStyle(color: Color(0xFF8E8E93)),
                               ),
                             )
                           : ListView.builder(
                               physics: const BouncingScrollPhysics(),
                               padding:
-                                  const EdgeInsets.fromLTRB(12, 0, 12, 175),
+                                  const EdgeInsets.fromLTRB(10, 0, 10, 175),
                               itemCount: _results.length,
                               itemBuilder: (_, i) {
                                 final track = _results[i];
@@ -210,77 +211,88 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _buildSearchHistory(List<String> history, bool highGlass) {
+  Widget _buildSearchHistory(List<String> history) {
     if (history.isEmpty) {
-      return Center(
+      return const Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
+          padding: EdgeInsets.symmetric(horizontal: 28),
           child: Text(
             'Nhập tên bài hát hoặc nghệ sĩ để tìm trên YouTube Music.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.48),
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Color(0xFF636366), fontSize: 14),
           ),
         ),
       );
     }
 
-    return ListView(
+    return ListView.separated(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 175),
-      children: [
-        Text(
-          'Tìm kiếm gần đây',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.72),
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: history.map((q) {
-            return SpringTap(
-              onTap: () {
-                _textCtrl.text = q;
-                _textCtrl.selection = TextSelection.fromPosition(
-                  TextPosition(offset: q.length),
-                );
-                _runSearch(q, saveHistory: true);
-              },
-              child: GlassSurface(
-                borderRadius: 18,
-                opacity: 0.10,
-                highQuality: highGlass,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      q,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                    ),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () => widget.controller.removeSearchQuery(q),
-                      child: Icon(
-                        Icons.close_rounded,
-                        size: 15,
-                        color: Colors.white.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 175),
+      itemCount: history.length + 1,
+      separatorBuilder: (_, idx) => idx == 0
+          ? const SizedBox(height: 6)
+          : Container(height: 0.5, color: const Color(0xFF1C1C20)),
+      itemBuilder: (_, i) {
+        if (i == 0) {
+          return const Padding(
+            padding: EdgeInsets.only(bottom: 4),
+            child: Text(
+              'Gần đây',
+              style: TextStyle(
+                color: Color(0xFF8E8E93),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
+            ),
+          );
+        }
+        final q = history[i - 1];
+        return InkWell(
+          onTap: () {
+            _textCtrl.text = q;
+            _textCtrl.selection = TextSelection.fromPosition(
+              TextPosition(offset: q.length),
             );
-          }).toList(),
-        ),
-      ],
+            _runSearch(q, saveHistory: true);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.history_rounded,
+                  size: 19,
+                  color: Color(0xFF636366),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    q,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => widget.controller.removeSearchQuery(q),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 17,
+                      color: Color(0xFF636366),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

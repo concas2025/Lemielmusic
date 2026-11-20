@@ -3,11 +3,14 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import '../models/user_profile.dart';
-import '../theme/lemiel_theme.dart';
 
-/// Personal Member ID Card faithfully modeled after the 1.89:1 brushed-metal /
-/// obsidian pass layout with a 90°-rotated vertical scrolling marquee strip,
-/// proportional unit scaling, interactive sheen, and 100% Lemielmusic identity.
+/// Mochy-Music exact 1.89:1 Personal Member ID Card (100% Lemielmusic brand):
+/// - Matte charcoal (#2F2F2F) on Profile (clean, zero neon glow) OR brushed
+///   metallic silver with 3px horizontal micro-grain & diagonal sheen on
+///   Onboarding / toggle.
+/// - Proportional unit scaling (`maxWidth / 332`) with monospace PROFILE USR#,
+///   large circular avatar, `ID CARD OF`, bold username, joined date, and
+///   continuously scrolling 90°-rotated right vertical marquee strip.
 class ProfileIdCard extends StatefulWidget {
   final UserProfile profile;
   final Color accentColor;
@@ -57,18 +60,15 @@ class _ProfileIdCardState extends State<ProfileIdCard>
 
   @override
   Widget build(BuildContext context) {
-    final theme = LemielTheme.of(context);
     final silver = widget.forceSilver ?? widget.profile.silverCard;
     final fg = silver ? const Color(0xFF111114) : Colors.white;
-    final fgMuted = silver
-        ? const Color(0xFF3A3A40)
-        : const Color(0xFFB5B5BD);
+    final fgMuted = silver ? const Color(0xFF3A3A40) : const Color(0xFFB5B5B5);
     final stripBg = silver
-        ? Colors.black.withValues(alpha: 0.16)
-        : (theme.isClassic ? const Color(0xFF161820) : const Color(0xFF17171D));
+        ? Colors.black.withValues(alpha: 0.18)
+        : const Color(0xFF1B1B1B);
     final stripFg = silver
         ? const Color(0xFF2B2B30).withValues(alpha: 0.78)
-        : const Color(0xFF8C8C96);
+        : const Color(0xFF8A8A8A);
 
     final displayName = widget.profile.displayName.trim().isNotEmpty
         ? widget.profile.displayName.trim()
@@ -96,14 +96,13 @@ class _ProfileIdCardState extends State<ProfileIdCard>
         curve: Curves.easeOutCubic,
         transform: Matrix4.identity()
           ..setEntry(3, 2, 0.001)
-          ..rotateX(-_tilt.dy * 0.14)
-          ..rotateY(_tilt.dx * 0.14),
+          ..rotateX(-_tilt.dy * 0.12)
+          ..rotateY(_tilt.dx * 0.12),
         transformAlignment: Alignment.center,
         child: AspectRatio(
           aspectRatio: 1.89,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              // Proportional unit matching the 332x176 card blueprint
               final unit = (constraints.maxWidth / 332.0).clamp(0.75, 1.5);
 
               return Container(
@@ -111,15 +110,9 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: [
                     BoxShadow(
-                      color: (silver ? Colors.white : widget.accentColor)
-                          .withValues(alpha: theme.isClassic ? 0.08 : 0.16),
-                      blurRadius: 24,
+                      color: Colors.black.withValues(alpha: 0.45),
+                      blurRadius: 22,
                       offset: const Offset(0, 10),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.42),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
@@ -130,14 +123,12 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                     builder: (_, child) => Stack(
                       fit: StackFit.expand,
                       children: [
-                        // Card material surface (Brushed Silver vs Obsidian Dark)
                         CustomPaint(
                           painter: _CardSurfacePainter(
                             silver: silver,
-                            isClassic: theme.isClassic,
-                            accentColor: widget.accentColor,
                             sheen: 0.5 +
-                                math.sin(_motionCtrl.value * 2 * math.pi) * 0.28 +
+                                math.sin(_motionCtrl.value * 2 * math.pi) *
+                                    0.28 +
                                 _tilt.dx * 0.8,
                             pressed: _pressed,
                           ),
@@ -147,68 +138,68 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                     ),
                     child: Row(
                       children: [
-                        // Left main ID card content
+                        // Left main body
                         Expanded(
                           child: Padding(
                             padding: EdgeInsets.fromLTRB(
-                              unit * 20,
-                              unit * 16,
+                              unit * 22,
+                              unit * 18,
                               unit * 12,
-                              unit * 16,
+                              unit * 18,
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Top monospace row: LEMIEL • MEMBER ID + Finish toggle
+                                // Top monospace row: PROFILE USR#LM-...
                                 Row(
                                   children: [
-                                    Expanded(
+                                    Flexible(
                                       child: Text(
-                                        'LEMIEL • ${widget.profile.memberId}',
+                                        'USR#${widget.profile.memberId}',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
                                           color: fgMuted,
                                           fontFamily: 'monospace',
-                                          fontSize: unit * 10.5,
+                                          fontSize: unit * 10.0,
                                           fontWeight: FontWeight.w600,
-                                          letterSpacing: 0.6,
+                                          letterSpacing: 0.3,
                                         ),
                                       ),
                                     ),
+                                    if (widget.showEditHint &&
+                                        widget.onEditTap != null) ...[
+                                      SizedBox(width: unit * 5),
+                                      GestureDetector(
+                                        onTap: widget.onEditTap,
+                                        child: Icon(
+                                          Icons.edit_outlined,
+                                          size: unit * 11,
+                                          color: fgMuted,
+                                        ),
+                                      ),
+                                    ],
+                                    const Spacer(),
                                     if (widget.onToggleFinish != null)
                                       GestureDetector(
                                         onTap: widget.onToggleFinish,
                                         child: Container(
                                           padding: EdgeInsets.symmetric(
                                             horizontal: unit * 7,
-                                            vertical: unit * 3,
+                                            vertical: unit * 2.5,
                                           ),
                                           decoration: BoxDecoration(
                                             borderRadius:
                                                 BorderRadius.circular(8),
-                                            color: fg.withValues(alpha: 0.09),
+                                            color: fg.withValues(alpha: 0.08),
                                           ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                silver
-                                                    ? Icons.dark_mode_rounded
-                                                    : Icons.auto_awesome_rounded,
-                                                size: unit * 11,
-                                                color: fg,
-                                              ),
-                                              SizedBox(width: unit * 3),
-                                              Text(
-                                                silver ? 'Obsidian' : 'Silver',
-                                                style: TextStyle(
-                                                  color: fg,
-                                                  fontSize: unit * 9.5,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                            ],
+                                          child: Text(
+                                            silver ? 'Dark' : 'Silver',
+                                            style: TextStyle(
+                                              color: fgMuted,
+                                              fontSize: unit * 9,
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -217,55 +208,26 @@ class _ProfileIdCardState extends State<ProfileIdCard>
 
                                 const Spacer(),
 
-                                // Main Identity Row: Large Circular Avatar + Name/Meta
+                                // Center Identity Row: 92*unit Circle Avatar + Name/Joined
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
                                     GestureDetector(
-                                      onTap: widget.onAvatarTap ?? widget.onEditTap,
-                                      child: Stack(
-                                        children: [
-                                          ProfileAvatar(
-                                            profile: widget.profile,
-                                            accentColor: widget.accentColor,
-                                            size: unit * 86,
-                                            borderColor: fg.withValues(alpha: 0.25),
-                                            showAddPlaceholder:
-                                                widget.onAvatarTap != null &&
-                                                    widget.profile.avatarPath == null &&
-                                                    widget.showEditHint,
-                                          ),
-                                          if (widget.onAvatarTap != null &&
-                                              widget.showEditHint)
-                                            Positioned(
-                                              right: 0,
-                                              bottom: 0,
-                                              child: Container(
-                                                width: unit * 24,
-                                                height: unit * 24,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: silver
-                                                      ? const Color(0xFF181920)
-                                                      : widget.accentColor,
-                                                  border: Border.all(
-                                                    color: silver
-                                                        ? const Color(0xFFE5E7EC)
-                                                        : const Color(0xFF23252E),
-                                                    width: 2,
-                                                  ),
-                                                ),
-                                                child: Icon(
-                                                  Icons.camera_alt_rounded,
-                                                  size: unit * 12,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                            ),
-                                        ],
+                                      onTap: widget.onAvatarTap ??
+                                          widget.onEditTap,
+                                      child: ProfileAvatar(
+                                        profile: widget.profile,
+                                        accentColor: widget.accentColor,
+                                        size: unit * 92,
+                                        neutralMonochrome: true,
+                                        showAddPlaceholder:
+                                            widget.onAvatarTap != null &&
+                                                widget.profile.avatarPath ==
+                                                    null &&
+                                                widget.showEditHint,
                                       ),
                                     ),
-                                    SizedBox(width: unit * 16),
+                                    SizedBox(width: unit * 18),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment:
@@ -273,13 +235,13 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Text(
-                                            'THẺ THÀNH VIÊN',
+                                            'ID CARD OF',
                                             style: TextStyle(
                                               color: fgMuted,
                                               fontFamily: 'monospace',
-                                              fontSize: unit * 9.2,
-                                              fontWeight: FontWeight.w700,
-                                              letterSpacing: 1.0,
+                                              fontSize: unit * 9.5,
+                                              fontWeight: FontWeight.w600,
+                                              letterSpacing: 0.5,
                                             ),
                                           ),
                                           SizedBox(height: unit * 2),
@@ -289,25 +251,25 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                                                 child: Text(
                                                   displayName,
                                                   maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                   style: TextStyle(
                                                     color: fg,
-                                                    fontSize: unit * 20,
+                                                    fontSize: unit * 21,
                                                     fontWeight: FontWeight.w800,
                                                     letterSpacing: -0.5,
-                                                    height: 1.12,
+                                                    height: 1.15,
                                                   ),
                                                 ),
                                               ),
-                                              if ((widget.showEditHint ||
-                                                      widget.onEditTap != null) &&
+                                              if (widget.showEditHint &&
                                                   widget.onEditTap != null) ...[
                                                 SizedBox(width: unit * 5),
                                                 GestureDetector(
                                                   onTap: widget.onEditTap,
                                                   child: Icon(
-                                                    Icons.edit_rounded,
-                                                    size: unit * 12.5,
+                                                    Icons.edit_outlined,
+                                                    size: unit * 12,
                                                     color: fgMuted,
                                                   ),
                                                 ),
@@ -316,7 +278,7 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                                           ),
                                           SizedBox(height: unit * 4),
                                           Text(
-                                            'Tham gia từ ${widget.profile.joinedDate}',
+                                            'joined ${widget.profile.joinedDate}',
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
@@ -325,31 +287,6 @@ class _ProfileIdCardState extends State<ProfileIdCard>
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
-                                          if (widget.profile.totalPlays > 0 ||
-                                              widget.favoritesCount > 0) ...[
-                                            SizedBox(height: unit * 2),
-                                            Text(
-                                              '${widget.profile.totalPlays} lượt nghe • ${widget.favoritesCount} yêu thích',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                color: fgMuted,
-                                                fontSize: unit * 9.5,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ] else if (widget.profile.bio.isNotEmpty) ...[
-                                            SizedBox(height: unit * 2),
-                                            Text(
-                                              widget.profile.bio,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                color: fgMuted,
-                                                fontSize: unit * 9.5,
-                                              ),
-                                            ),
-                                          ],
                                         ],
                                       ),
                                     ),
@@ -364,16 +301,18 @@ class _ProfileIdCardState extends State<ProfileIdCard>
 
                         // Right Vertical Signature Marquee Strip (40*unit wide)
                         SizedBox(
-                          width: unit * 38,
+                          width: unit * 40,
                           height: double.infinity,
                           child: AnimatedBuilder(
                             animation: _motionCtrl,
                             builder: (_, _) => CustomPaint(
                               painter: _VerticalMarqueePainter(
-                                text: 'LEMIELMUSIC • ${displayName.toUpperCase()}   ·   ',
+                                text: "$displayName's CARD   ·   LEMIEL   ·   ",
                                 color: stripFg,
                                 background: stripBg,
-                                fontSize: unit * 13.5,
+                                fontSize: unit * 14.5,
+                                fontFamily:
+                                    DefaultTextStyle.of(context).style.fontFamily,
                                 progress: _motionCtrl.value,
                               ),
                             ),
@@ -392,19 +331,13 @@ class _ProfileIdCardState extends State<ProfileIdCard>
   }
 }
 
-/// Paints brushed metallic silver (with 3px horizontal micro-grain + diagonal
-/// specular sheen) or deep obsidian graphite/glass.
 class _CardSurfacePainter extends CustomPainter {
   final bool silver;
-  final bool isClassic;
-  final Color accentColor;
   final double sheen;
   final bool pressed;
 
   _CardSurfacePainter({
     required this.silver,
-    required this.isClassic,
-    required this.accentColor,
     required this.sheen,
     required this.pressed,
   });
@@ -414,7 +347,7 @@ class _CardSurfacePainter extends CustomPainter {
     final rect = Offset.zero & size;
 
     if (silver) {
-      // 5-stop brushed silver metallic base
+      // Exact Mochy 5-stop brushed silver metallic surface
       canvas.drawRect(
         rect,
         Paint()
@@ -432,9 +365,8 @@ class _CardSurfacePainter extends CustomPainter {
           ).createShader(rect),
       );
 
-      // Fine horizontal brushed-metal micro-grain every 3px
       final grainEven = Paint()
-        ..color = Colors.white.withValues(alpha: 0.055)
+        ..color = Colors.white.withValues(alpha: 0.05)
         ..strokeWidth = 1.0;
       final grainOdd = Paint()
         ..color = Colors.white.withValues(alpha: 0.025)
@@ -449,7 +381,6 @@ class _CardSurfacePainter extends CustomPainter {
         );
       }
 
-      // Soft diagonal specular sheen highlight
       final cx = sheen.clamp(-0.2, 1.2) * size.width;
       canvas.drawRect(
         rect,
@@ -461,96 +392,35 @@ class _CardSurfacePainter extends CustomPainter {
             stops: const [0.0, 0.5, 1.0],
             colors: [
               Colors.transparent,
-              Colors.white.withValues(alpha: 0.45),
+              Colors.white.withValues(alpha: 0.50),
               Colors.transparent,
             ],
           ).createShader(rect),
       );
     } else {
-      // Deep obsidian matte / liquid glass dark card
-      canvas.drawRect(
-        rect,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isClassic
-                ? const [
-                    Color(0xFF262936),
-                    Color(0xFF1D202B),
-                    Color(0xFF232634),
-                  ]
-                : [
-                    const Color(0xFF282834),
-                    const Color(0xFF1A1B24),
-                    Color.lerp(const Color(0xFF20212D), accentColor, 0.16)!,
-                  ],
-          ).createShader(rect),
-      );
-
-      // Subtle diagonal shimmer on dark card
-      final cx = sheen.clamp(-0.2, 1.2) * size.width;
-      canvas.drawRect(
-        rect,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment((cx - size.width * 0.35) / size.width * 2 - 1, -1),
-            end: Alignment((cx + size.width * 0.15) / size.width * 2 - 1, 1),
-            stops: const [0.0, 0.5, 1.0],
-            colors: [
-              Colors.transparent,
-              Colors.white.withValues(alpha: isClassic ? 0.05 : 0.09),
-              Colors.transparent,
-            ],
-          ).createShader(rect),
-      );
+      // Exact Mochy matte charcoal #2F2F2F (crisp, timeless, zero neon!)
+      canvas.drawRect(rect, Paint()..color = const Color(0xFF2F2F2F));
     }
 
     if (pressed) {
       canvas.drawRect(
         rect,
-        Paint()..color = Colors.white.withValues(alpha: silver ? 0.22 : 0.10),
+        Paint()..color = Colors.white.withValues(alpha: silver ? 0.24 : 0.10),
       );
     }
-
-    // Crisp outer rim
-    final rrect = RRect.fromRectAndRadius(
-      rect.deflate(0.6),
-      const Radius.circular(22),
-    );
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: silver ? 0.72 : 0.28),
-            Colors.white.withValues(alpha: 0.06),
-            Colors.white.withValues(alpha: silver ? 0.45 : 0.18),
-          ],
-        ).createShader(rect),
-    );
   }
 
   @override
   bool shouldRepaint(covariant _CardSurfacePainter old) =>
-      old.silver != silver ||
-      old.isClassic != isClassic ||
-      old.accentColor != accentColor ||
-      old.sheen != sheen ||
-      old.pressed != pressed;
+      old.silver != silver || old.sheen != sheen || old.pressed != pressed;
 }
 
-/// Draws 90°-rotated vertical continuously scrolling marquee text on the right
-/// strip of the ID card with zero widget tree rebuilds.
 class _VerticalMarqueePainter extends CustomPainter {
   final String text;
   final Color color;
   final Color background;
   final double fontSize;
+  final String? fontFamily;
   final double progress;
 
   _VerticalMarqueePainter({
@@ -558,6 +428,7 @@ class _VerticalMarqueePainter extends CustomPainter {
     required this.color,
     required this.background,
     required this.fontSize,
+    this.fontFamily,
     required this.progress,
   });
 
@@ -569,10 +440,11 @@ class _VerticalMarqueePainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: TextStyle(
+          fontFamily: fontFamily,
           color: color,
           fontSize: fontSize,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.0,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.4,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -602,14 +474,13 @@ class _VerticalMarqueePainter extends CustomPainter {
       old.fontSize != fontSize;
 }
 
-/// Renders either the user's saved photo avatar or their chosen curated monogram
-/// gradient (with an optional subtle `+` placeholder during onboarding).
 class ProfileAvatar extends StatelessWidget {
   final UserProfile profile;
   final Color accentColor;
   final double size;
   final Color? borderColor;
   final bool showAddPlaceholder;
+  final bool neutralMonochrome;
 
   const ProfileAvatar({
     super.key,
@@ -618,6 +489,7 @@ class ProfileAvatar extends StatelessWidget {
     this.size = 44,
     this.borderColor,
     this.showAddPlaceholder = false,
+    this.neutralMonochrome = false,
   });
 
   @override
@@ -625,27 +497,24 @@ class ProfileAvatar extends StatelessWidget {
     final path = profile.avatarPath;
     final hasFile =
         !kIsWeb && path != null && path.isNotEmpty && File(path).existsSync();
-    final colors = profile.avatarPresetIndex == 0
-        ? [
-            accentColor,
-            Color.lerp(accentColor, const Color(0xFF5E5CE6), 0.55)!,
-          ]
-        : profile.avatarColors;
+    final useNeutral = neutralMonochrome && profile.avatarPresetIndex == 0;
 
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(
-          color: borderColor ?? Colors.white.withValues(alpha: 0.28),
-          width: 1.4,
-        ),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: colors,
-        ),
+        color: useNeutral ? const Color(0xFF4F4F52) : null,
+        gradient: useNeutral
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: profile.avatarColors,
+              ),
+        border: borderColor != null
+            ? Border.all(color: borderColor!, width: 1.2)
+            : null,
       ),
       child: ClipOval(
         child: hasFile
@@ -658,16 +527,16 @@ class ProfileAvatar extends StatelessWidget {
             : Center(
                 child: showAddPlaceholder
                     ? Icon(
-                        Icons.add_a_photo_rounded,
-                        color: Colors.white.withValues(alpha: 0.88),
-                        size: size * 0.34,
+                        Icons.add_rounded,
+                        color: Colors.white.withValues(alpha: 0.72),
+                        size: size * 0.36,
                       )
                     : Text(
                         profile.initials,
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: size * 0.36,
-                          fontWeight: FontWeight.w800,
+                          color: Colors.white.withValues(alpha: 0.90),
+                          fontSize: size * 0.34,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
               ),

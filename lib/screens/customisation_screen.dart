@@ -41,7 +41,7 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
     final accent = s.accentColor;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF06060A),
+      backgroundColor: Colors.black,
       body: AmbientBackground(
         artworkUrl: widget.previewArtworkUrl,
         accentColor: accent,
@@ -52,38 +52,48 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
             slivers: [
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 20, 8),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 20, 10),
                   child: Row(
                     children: [
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(
-                          Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white,
-                          size: 20,
+                      SpringTap(
+                        onTap: () => Navigator.of(context).pop(),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Color(0xFF1C1C20),
+                          ),
+                          child: const Icon(
+                            Icons.arrow_back_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Tuỳ biến giao diện',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tuỳ biến giao diện',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                              ),
                             ),
-                          ),
-                          Text(
-                            'Liquid Glass • Phong cách trình phát • Lời bài hát',
-                            style: TextStyle(
-                              color: Colors.white60,
-                              fontSize: 12,
+                            Text(
+                              'Liquid Glass • Phong cách trình phát • Lời bài hát',
+                              style: TextStyle(
+                                color: Color(0xFF8E8E93),
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -145,7 +155,7 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                     runSpacing: 10,
                     children: [
                       _OptionPill(
-                        label: 'Flagship Glass',
+                        label: 'Flagship Mochy',
                         icon: Icons.auto_awesome_rounded,
                         selected: s.playerStyle == PlayerStyle.flagship,
                         accent: accent,
@@ -161,7 +171,7 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                             .setPlayerStyle(PlayerStyle.vinyl),
                       ),
                       _OptionPill(
-                        label: 'Tràn viền',
+                        label: 'Khung nổi',
                         icon: Icons.crop_free_rounded,
                         selected: s.playerStyle == PlayerStyle.edgeToEdge,
                         accent: accent,
@@ -298,9 +308,11 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                                         : null,
                                   ),
                                   child: selected
-                                      ? const Icon(
+                                      ? Icon(
                                           Icons.check_rounded,
-                                          color: Colors.black87,
+                                          color: preset.color.computeLuminance() > 0.55
+                                              ? Colors.black
+                                              : Colors.white,
                                           size: 20,
                                         )
                                       : null,
@@ -421,15 +433,16 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(12),
                                     color: s.lyricsAlign == align
-                                        ? accent.withValues(alpha: 0.28)
-                                        : Colors.white.withValues(alpha: 0.08),
-                                    border: Border.all(
-                                      color: s.lyricsAlign == align
-                                          ? accent
-                                          : Colors.white12,
-                                    ),
+                                        ? accent
+                                        : const Color(0xFF1E1E22),
                                   ),
-                                  child: Icon(icon, size: 18, color: Colors.white),
+                                  child: Icon(
+                                    icon,
+                                    size: 18,
+                                    color: s.lyricsAlign == align
+                                        ? s.onAccentColor
+                                        : Colors.white70,
+                                  ),
                                 ),
                               ),
                             ),
@@ -500,13 +513,8 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            color: Colors.white.withValues(alpha: 0.06),
-                            border: Border.all(
-                              color: enabled
-                                  ? accent.withValues(alpha: 0.35)
-                                  : Colors.white10,
-                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            color: const Color(0xFF1A1A1E),
                           ),
                           child: Row(
                             children: [
@@ -516,16 +524,16 @@ class _CustomisationScreenState extends State<CustomisationScreen> {
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  color: enabled
-                                      ? accent.withValues(alpha: 0.25)
-                                      : Colors.white10,
+                                  color: enabled ? accent : Colors.white10,
                                 ),
                                 child: Text(
                                   '${index + 1}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: enabled
+                                        ? s.onAccentColor
+                                        : Colors.white54,
                                     fontSize: 11,
-                                    fontWeight: FontWeight.w700,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
                               ),
@@ -626,9 +634,10 @@ class _LivePlayerPreview extends StatelessWidget {
                           settings.playerStyle == PlayerStyle.edgeToEdge ? 8 : 16,
                         ),
                   gradient: LinearGradient(
-                    colors: [accent, const Color(0xFF5E5CE6)],
+                    colors: settings.isMonochrome
+                        ? const [Color(0xFF34343B), Color(0xFF19191E)]
+                        : [accent, Color.lerp(accent, Colors.black, 0.45)!],
                   ),
-                  border: Border.all(color: Colors.white30, width: 1.2),
                 ),
                 child: Icon(
                   settings.playerStyle == PlayerStyle.vinyl
@@ -788,12 +797,10 @@ class _ThemeCardOption extends StatelessWidget {
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          color: selected
-              ? accent.withValues(alpha: 0.24)
-              : Colors.white.withValues(alpha: 0.06),
+          color: selected ? const Color(0xFF1F1F24) : const Color(0xFF161619),
           border: Border.all(
-            color: selected ? accent : Colors.white.withValues(alpha: 0.14),
-            width: selected ? 1.4 : 0.9,
+            color: selected ? accent : Colors.transparent,
+            width: selected ? 1.4 : 0.0,
           ),
         ),
         child: Column(
@@ -848,6 +855,8 @@ class _OptionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onAccent =
+        accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
     return SpringTap(
       onTap: onTap,
       child: AnimatedContainer(
@@ -855,26 +864,24 @@ class _OptionPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: selected
-              ? accent.withValues(alpha: 0.28)
-              : Colors.white.withValues(alpha: 0.07),
-          border: Border.all(
-            color: selected ? accent : Colors.white.withValues(alpha: 0.14),
-            width: selected ? 1.2 : 0.8,
-          ),
+          color: selected ? accent : const Color(0xFF1C1C20),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 16, color: selected ? Colors.white : Colors.white70),
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? onAccent : const Color(0xFFAEAEB2),
+              ),
               const SizedBox(width: 6),
             ],
             Text(
               label,
               style: TextStyle(
-                color: selected ? Colors.white : Colors.white70,
+                color: selected ? onAccent : const Color(0xFFAEAEB2),
                 fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),

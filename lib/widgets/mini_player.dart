@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import '../services/player_controller.dart';
 import 'glass.dart';
 
+/// BitChord / Mochy sleek smoked floating Mini Player capsule.
 class MiniPlayer extends StatelessWidget {
   final PlayerController controller;
   final Color accentColor;
@@ -26,22 +27,20 @@ class MiniPlayer extends StatelessWidget {
         if ((details.primaryVelocity ?? 0) < -160) onTap();
       },
       child: SpringTap(
-        pressedScale: 0.975,
+        pressedScale: 0.98,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
           child: GlassSurface(
-            borderRadius: 24,
-            blur: 22,
-            opacity: 0.17,
-            tintColor: const Color(0xFF1A1A26),
+            borderRadius: 22,
+            blur: 24,
             isLens: true,
             highQuality: highGlass,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  padding: const EdgeInsets.fromLTRB(9, 8, 6, 8),
                   child: Row(
                     children: [
                       Hero(
@@ -55,30 +54,18 @@ class MiniPlayer extends StatelessWidget {
                         ) {
                           return ClipRRect(
                             borderRadius: BorderRadius.circular(
-                              12 + 12 * animation.value,
+                              10 + 14 * animation.value,
                             ),
                             child: toHeroContext.widget,
                           );
                         },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.32),
-                                blurRadius: 8,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: ArtworkImage(
-                            url: track.artworkUrl,
-                            size: 46,
-                            radius: 12,
-                          ),
+                        child: ArtworkImage(
+                          url: track.artworkUrl,
+                          size: 42,
+                          radius: 10,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 11),
                       Expanded(
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 220),
@@ -97,20 +84,20 @@ class MiniPlayer extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.25,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
-                              const SizedBox(height: 2),
+                              const SizedBox(height: 1.5),
                               Text(
                                 controller.isLoadingStream
-                                    ? 'Đang kết nối luồng âm thanh...'
+                                    ? 'Đang kết nối...'
                                     : track.artist,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.62),
+                                style: const TextStyle(
+                                  color: Color(0xFF8E8E93),
                                   fontSize: 12,
                                 ),
                               ),
@@ -122,8 +109,8 @@ class MiniPlayer extends StatelessWidget {
                         const Padding(
                           padding: EdgeInsets.all(10),
                           child: SizedBox(
-                            width: 20,
-                            height: 20,
+                            width: 18,
+                            height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
                               color: Colors.white,
@@ -134,7 +121,7 @@ class MiniPlayer extends StatelessWidget {
                         IconButton(
                           onPressed: controller.togglePlayPause,
                           icon: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
+                            duration: const Duration(milliseconds: 160),
                             transitionBuilder: (child, anim) =>
                                 ScaleTransition(scale: anim, child: child),
                             child: Icon(
@@ -143,7 +130,7 @@ class MiniPlayer extends StatelessWidget {
                                   : Icons.play_arrow_rounded,
                               key: ValueKey(controller.isPlaying),
                               color: Colors.white,
-                              size: 28,
+                              size: 27,
                             ),
                           ),
                           visualDensity: VisualDensity.compact,
@@ -151,9 +138,9 @@ class MiniPlayer extends StatelessWidget {
                       IconButton(
                         onPressed: () => controller.next(),
                         icon: const Icon(
-                          Icons.skip_next_rounded,
-                          color: Colors.white70,
-                          size: 26,
+                          Icons.fast_forward_rounded,
+                          color: Colors.white,
+                          size: 24,
                         ),
                         visualDensity: VisualDensity.compact,
                       ),
@@ -163,7 +150,7 @@ class MiniPlayer extends StatelessWidget {
                 RepaintBoundary(
                   child: ClipRRect(
                     borderRadius: const BorderRadius.vertical(
-                      bottom: Radius.circular(24),
+                      bottom: Radius.circular(22),
                     ),
                     child: StreamBuilder<Duration>(
                       stream: controller.positionStream,
@@ -176,9 +163,10 @@ class MiniPlayer extends StatelessWidget {
                             : 0.0;
                         return LinearProgressIndicator(
                           value: progress,
-                          minHeight: 2.4,
+                          minHeight: 1.8,
                           backgroundColor: Colors.white.withValues(alpha: 0.08),
-                          valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(accentColor),
                         );
                       },
                     ),

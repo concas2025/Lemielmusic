@@ -7,7 +7,6 @@ import '../models/app_settings.dart';
 import '../models/track.dart';
 import '../theme/lemiel_theme.dart';
 
-/// Builds a 4x5 saturation color matrix for Apple iOS 26 Liquid Glass vibrancy.
 List<double> _saturationMatrix(double sat) {
   final inv = 1.0 - sat;
   const r = 0.2126;
@@ -21,11 +20,12 @@ List<double> _saturationMatrix(double sat) {
   ];
 }
 
-/// Adaptive surface component:
-/// - In **Liquid Glass** mode: translucent frosted glass with vibrancy boost and
-///   subtle angled specular rim highlights.
-/// - In **Classic** mode: crisp, solid elevated surface with clean borders and
-///   high readability (zero BackdropFilter blur).
+/// BitChord / iOS 26 smoked Liquid Glass & Mochy tonal surface.
+/// - `isLens: true` (Dock, Search Orb, Mini Player, floating controls): authentic
+///   smoked Liquid Glass with curved Fresnel edge specular highlight + backdrop
+///   vibrancy in Liquid Glass mode, or crisp matte surface in Classic mode.
+/// - `isLens: false` (content cards): clean, restrained, borderless tonal dark
+///   surface (matching BitChord & Mochy's uncluttered aesthetic).
 class GlassSurface extends StatelessWidget {
   final Widget child;
   final double borderRadius;
@@ -42,7 +42,7 @@ class GlassSurface extends StatelessWidget {
     super.key,
     required this.child,
     this.borderRadius = 22,
-    this.blur = 18,
+    this.blur = 22,
     this.tintColor,
     this.opacity = 0.10,
     this.padding,
@@ -55,19 +55,19 @@ class GlassSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = LemielTheme.of(context);
+    final isSemanticTint = tintColor != null &&
+        tintColor != Colors.white &&
+        tintColor != const Color(0xFF1A1A26) &&
+        tintColor != const Color(0xFF14141E) &&
+        tintColor != const Color(0xFF14141D) &&
+        tintColor != const Color(0xFF18181C);
 
-    // Classic mode: crisp, readable, elevated solid surface with subtle border.
-    if (theme.isClassic) {
-      final hasAccentTint =
-          tintColor != null &&
-          tintColor != Colors.white &&
-          tintColor != const Color(0xFF1A1A26) &&
-          tintColor != const Color(0xFF14141E) &&
-          tintColor != const Color(0xFF14141D);
+    // Classic mode OR non-lens content cards: clean borderless Mochy/BitChord tonal cards.
+    if (theme.isClassic || !isLens) {
       final baseSurface = isLens ? theme.surfaceElevated : theme.surface;
-      final bg = hasAccentTint
+      final bg = isSemanticTint
           ? Color.alphaBlend(
-              tintColor!.withValues(alpha: (opacity + 0.14).clamp(0.18, 0.85)),
+              tintColor!.withValues(alpha: (opacity + 0.12).clamp(0.14, 0.85)),
               baseSurface,
             )
           : baseSurface;
@@ -78,35 +78,38 @@ class GlassSurface extends StatelessWidget {
           color: bg,
           borderRadius: BorderRadius.circular(borderRadius),
           border: border ??
-              Border.all(
-                color: hasAccentTint
-                    ? tintColor!.withValues(alpha: 0.45)
-                    : Colors.white.withValues(alpha: isLens ? 0.12 : 0.08),
-                width: 1.0,
-              ),
+              (isLens
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.09),
+                      width: 0.8,
+                    )
+                  : null),
           boxShadow: boxShadow ??
               (isLens
                   ? [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.34),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
+                        color: Colors.black.withValues(alpha: 0.48),
+                        blurRadius: 24,
+                        offset: const Offset(0, 10),
                       ),
                     ]
                   : null),
         ),
-        child: child,
+        child: Material(
+          type: MaterialType.transparency,
+          child: child,
+        ),
       );
     }
 
-    // Liquid Glass mode: refined translucent glass + vibrancy + specular rim.
-    final base = tintColor ?? Colors.white;
+    // Liquid Glass Lens mode (Dock, Search Orb, Mini Player, floating sheets):
+    // Smoked dark iOS 26 / BitChord glass with vibrant refraction & razor-thin Fresnel rim.
     final useHigh = highQuality && theme.highGlass;
-    final effectiveBlur = useHigh ? blur : (blur * 0.45).clamp(4.0, 10.0);
+    final effectiveBlur = useHigh ? blur : (blur * 0.45).clamp(6.0, 12.0);
 
     final filter = useHigh
         ? ImageFilter.compose(
-            outer: ColorFilter.matrix(_saturationMatrix(isLens ? 1.55 : 1.32)),
+            outer: ColorFilter.matrix(_saturationMatrix(1.62)),
             inner: ImageFilter.blur(
               sigmaX: effectiveBlur,
               sigmaY: effectiveBlur,
@@ -114,121 +117,168 @@ class GlassSurface extends StatelessWidget {
           )
         : ImageFilter.blur(sigmaX: effectiveBlur, sigmaY: effectiveBlur);
 
-    final surface = ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: BackdropFilter(
-        filter: filter,
-        child: CustomPaint(
-          foregroundPainter: border == null
-              ? _LiquidSpecularRimPainter(
-                  borderRadius: borderRadius,
-                  isLens: isLens,
-                  tintColor: tintColor,
-                )
-              : null,
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(borderRadius),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                stops: const [0.0, 0.45, 1.0],
-                colors: [
-                  base.withValues(
-                    alpha: (opacity + (isLens ? 0.10 : 0.05)).clamp(0.0, 0.94),
-                  ),
-                  base.withValues(alpha: (opacity * 0.65).clamp(0.0, 0.90)),
-                  base.withValues(alpha: (opacity * 0.85).clamp(0.0, 0.90)),
-                ],
+    final glassFill = isSemanticTint
+        ? tintColor!.withValues(alpha: (opacity + 0.16).clamp(0.20, 0.80))
+        : const Color(0xFF1A1A1E).withValues(alpha: 0.68);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(borderRadius),
+        boxShadow: boxShadow ??
+            [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.50),
+                blurRadius: 26,
+                offset: const Offset(0, 12),
               ),
-              border: border,
+            ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: BackdropFilter(
+          filter: filter,
+          child: CustomPaint(
+            foregroundPainter: border == null
+                ? _LiquidLensRimPainter(borderRadius: borderRadius)
+                : null,
+            child: Container(
+              padding: padding,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(borderRadius),
+                color: glassFill,
+                border: border,
+              ),
+              child: child,
             ),
-            child: child,
           ),
         ),
       ),
     );
-
-    if (boxShadow != null || isLens) {
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(borderRadius),
-          boxShadow: boxShadow ??
-              [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.34),
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-        ),
-        child: surface,
-      );
-    }
-
-    return surface;
   }
 }
 
-/// Paints an angled iOS 26 Liquid Glass specular refraction rim + subtle top sheen.
-class _LiquidSpecularRimPainter extends CustomPainter {
+/// Paints an authentic iOS 26 / BitChord curved Fresnel edge highlight + subtle
+/// top optical meniscus reflection (thin & refined, never chunky).
+class _LiquidLensRimPainter extends CustomPainter {
   final double borderRadius;
-  final bool isLens;
-  final Color? tintColor;
 
-  _LiquidSpecularRimPainter({
-    required this.borderRadius,
-    required this.isLens,
-    this.tintColor,
-  });
+  _LiquidLensRimPainter({required this.borderRadius});
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final rrect = RRect.fromRectAndRadius(
-      rect.deflate(0.6),
+      rect.deflate(0.45),
       Radius.circular(borderRadius),
     );
 
-    final sheenPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        stops: const [0.0, 0.26, 1.0],
-        colors: [
-          Colors.white.withValues(alpha: isLens ? 0.20 : 0.10),
-          Colors.white.withValues(alpha: 0.01),
-          Colors.transparent,
-        ],
-      ).createShader(rect);
-    canvas.drawRRect(rrect, sheenPaint);
+    // Subtle upper optical meniscus highlight
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0.0, 0.22, 1.0],
+          colors: [
+            Colors.white.withValues(alpha: 0.13),
+            Colors.white.withValues(alpha: 0.015),
+            Colors.transparent,
+          ],
+        ).createShader(rect),
+    );
 
-    final rimPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = isLens ? 1.1 : 0.9
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        stops: const [0.0, 0.38, 0.68, 1.0],
-        colors: [
-          Colors.white.withValues(alpha: isLens ? 0.50 : 0.30),
-          Colors.white.withValues(alpha: isLens ? 0.12 : 0.06),
-          (tintColor ?? Colors.white).withValues(alpha: isLens ? 0.12 : 0.05),
-          Colors.white.withValues(alpha: isLens ? 0.30 : 0.18),
-        ],
-      ).createShader(rect);
-    canvas.drawRRect(rrect, rimPaint);
+    // Razor-thin angled Fresnel specular rim
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.75
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          stops: const [0.0, 0.32, 0.68, 1.0],
+          colors: [
+            Colors.white.withValues(alpha: 0.36),
+            Colors.white.withValues(alpha: 0.08),
+            Colors.white.withValues(alpha: 0.05),
+            Colors.white.withValues(alpha: 0.22),
+          ],
+        ).createShader(rect),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _LiquidSpecularRimPainter old) =>
-      old.borderRadius != borderRadius ||
-      old.isLens != isLens ||
-      old.tintColor != tintColor;
+  bool shouldRepaint(covariant _LiquidLensRimPainter old) =>
+      old.borderRadius != borderRadius;
 }
 
-/// Real physics spring-scale tactile feedback button wrapper.
+/// Mochy-style dotted charcoal header container (rounded bottom corners +
+/// subtle micro-dot grid + optional giant background letter watermark).
+class DottedHeaderSurface extends StatelessWidget {
+  final Widget child;
+  final String? watermarkLetter;
+  final double bottomRadius;
+
+  const DottedHeaderSurface({
+    super.key,
+    required this.child,
+    this.watermarkLetter,
+    this.bottomRadius = 28,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.vertical(bottom: Radius.circular(bottomRadius)),
+      child: Container(
+        color: const Color(0xFF141416),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: CustomPaint(painter: _DotGridPainter()),
+            ),
+            if (watermarkLetter != null && watermarkLetter!.isNotEmpty)
+              Positioned(
+                right: -18,
+                top: 10,
+                child: IgnorePointer(
+                  child: Text(
+                    watermarkLetter!,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.045),
+                      fontSize: 220,
+                      fontWeight: FontWeight.w900,
+                      height: 0.9,
+                    ),
+                  ),
+                ),
+              ),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DotGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.white.withValues(alpha: 0.045);
+    const step = 14.0;
+    for (double y = 8; y < size.height; y += step) {
+      for (double x = 8; x < size.width; x += step) {
+        canvas.drawCircle(Offset(x, y), 0.9, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Real physics spring-scale tactile feedback wrapper.
 class SpringTap extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -241,7 +291,7 @@ class SpringTap extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.pressedScale = 0.95,
+    this.pressedScale = 0.96,
     this.haptic = true,
   });
 
@@ -298,7 +348,7 @@ class _SpringTapState extends State<SpringTap>
       child: AnimatedBuilder(
         animation: _ctrl,
         builder: (_, child) => Transform.scale(
-          scale: _ctrl.value.clamp(0.86, 1.04),
+          scale: _ctrl.value.clamp(0.88, 1.04),
           child: child,
         ),
         child: widget.child,
@@ -307,7 +357,7 @@ class _SpringTapState extends State<SpringTap>
   }
 }
 
-/// Short, purposeful staggered fade + slight upward slide entry animation.
+/// Short, purposeful staggered entry animation.
 class StaggeredFadeSlide extends StatefulWidget {
   final Widget child;
   final int index;
@@ -317,7 +367,7 @@ class StaggeredFadeSlide extends StatefulWidget {
     super.key,
     required this.child,
     this.index = 0,
-    this.delayStep = const Duration(milliseconds: 28),
+    this.delayStep = const Duration(milliseconds: 24),
   });
 
   @override
@@ -335,15 +385,15 @@ class _StaggeredFadeSlideState extends State<StaggeredFadeSlide>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 260),
     );
     _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
     _offset = Tween<Offset>(
-      begin: const Offset(0, 0.05),
+      begin: const Offset(0, 0.04),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
-    final delayMs = (widget.index.clamp(0, 8)) * widget.delayStep.inMilliseconds;
+    final delayMs = (widget.index.clamp(0, 6)) * widget.delayStep.inMilliseconds;
     if (delayMs == 0) {
       _ctrl.forward();
     } else {
@@ -371,19 +421,26 @@ class _StaggeredFadeSlideState extends State<StaggeredFadeSlide>
   }
 }
 
-/// GPU-optimized Ambient Background isolated inside a RepaintBoundary.
-/// Automatically tones down into a crisp, readable dark canvas in Classic mode.
+/// Clean OLED Obsidian background:
+/// - Default (`enableArtworkBackdrop: false`): pure pitch-black #000000 like
+///   BitChord & Mochy Music (zero garish neon blobs behind Home/Search/Library!).
+/// - On Now Playing (`enableArtworkBackdrop: true`): smoothly tinted by the
+///   real dominant color extracted from the current song's album cover.
 class AmbientBackground extends StatelessWidget {
   final String? artworkUrl;
   final Color accentColor;
+  final Color? dynamicTint;
   final PlayerBackgroundStyle style;
+  final bool enableArtworkBackdrop;
   final Widget child;
 
   const AmbientBackground({
     super.key,
     this.artworkUrl,
-    this.accentColor = const Color(0xFFFF375F),
+    this.accentColor = Colors.white,
+    this.dynamicTint,
     this.style = PlayerBackgroundStyle.ambientGlow,
+    this.enableArtworkBackdrop = false,
     required this.child,
   });
 
@@ -391,39 +448,14 @@ class AmbientBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = LemielTheme.of(context);
     final isOled = style == PlayerBackgroundStyle.oledBlack;
-    final isDarkGrad = style == PlayerBackgroundStyle.darkGradient;
-    final isAppleBlur = style == PlayerBackgroundStyle.appleBlur;
 
-    if (theme.isClassic) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          RepaintBoundary(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: isOled ? Colors.black : theme.canvas,
-                gradient: isOled
-                    ? null
-                    : LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.0, 0.34, 1.0],
-                        colors: [
-                          Color.alphaBlend(
-                            accentColor.withValues(alpha: 0.12),
-                            theme.canvas,
-                          ),
-                          theme.canvas,
-                          const Color(0xFF0A0B10),
-                        ],
-                      ),
-              ),
-            ),
-          ),
-          child,
-        ],
-      );
+    if (!enableArtworkBackdrop || isOled) {
+      return ColoredBox(color: theme.canvas, child: child);
     }
+
+    final baseTint = dynamicTint ?? const Color(0xFF141418);
+    final isAppleBlur = style == PlayerBackgroundStyle.appleBlur;
+    final isDarkGrad = style == PlayerBackgroundStyle.darkGradient;
 
     return Stack(
       fit: StackFit.expand,
@@ -432,48 +464,21 @@ class AmbientBackground extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ColoredBox(color: isOled ? Colors.black : theme.canvas),
-              if (!isOled) ...[
-                Positioned(
-                  top: -130,
-                  left: -90,
-                  child: Container(
-                    width: 360,
-                    height: 360,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          accentColor.withValues(
-                            alpha: isDarkGrad ? 0.12 : 0.22,
-                          ),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 550),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      baseTint,
+                      Color.lerp(baseTint, Colors.black, 0.55)!,
+                      const Color(0xFF0A0A0D),
+                    ],
                   ),
                 ),
-                Positioned(
-                  top: 150,
-                  right: -110,
-                  child: Container(
-                    width: 340,
-                    height: 340,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          const Color(0xFF5E5CE6).withValues(
-                            alpha: isDarkGrad ? 0.08 : 0.18,
-                          ),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-              if (!isOled &&
+              ),
+              if (!theme.isClassic &&
                   !isDarkGrad &&
                   artworkUrl != null &&
                   artworkUrl!.isNotEmpty)
@@ -481,11 +486,11 @@ class AmbientBackground extends StatelessWidget {
                   duration: const Duration(milliseconds: 650),
                   child: Opacity(
                     key: ValueKey('${artworkUrl}_${style.name}'),
-                    opacity: isAppleBlur ? 0.48 : 0.26,
+                    opacity: isAppleBlur ? 0.44 : 0.22,
                     child: ImageFiltered(
                       imageFilter: ImageFilter.blur(
-                        sigmaX: isAppleBlur ? 42 : 52,
-                        sigmaY: isAppleBlur ? 42 : 52,
+                        sigmaX: isAppleBlur ? 44 : 56,
+                        sigmaY: isAppleBlur ? 44 : 56,
                       ),
                       child: Image.network(
                         artworkUrl!,
@@ -498,26 +503,19 @@ class AmbientBackground extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (!isOled)
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: isAppleBlur
-                          ? [
-                              Colors.black.withValues(alpha: 0.22),
-                              const Color(0xFF07070B).withValues(alpha: 0.58),
-                              const Color(0xFF06060A).withValues(alpha: 0.90),
-                            ]
-                          : [
-                              Colors.black.withValues(alpha: 0.26),
-                              const Color(0xFF06060A).withValues(alpha: 0.74),
-                              const Color(0xFF06060A).withValues(alpha: 0.96),
-                            ],
-                    ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.16),
+                      baseTint.withValues(alpha: 0.65),
+                      const Color(0xFF0A0A0D).withValues(alpha: 0.94),
+                    ],
                   ),
                 ),
+              ),
             ],
           ),
         ),
@@ -535,8 +533,8 @@ class ArtworkImage extends StatelessWidget {
   const ArtworkImage({
     super.key,
     required this.url,
-    this.size = 52,
-    this.radius = 12,
+    this.size = 50,
+    this.radius = 10,
   });
 
   @override
@@ -547,12 +545,12 @@ class ArtworkImage extends StatelessWidget {
       child: Container(
         width: size,
         height: size,
-        color: Colors.white.withValues(alpha: 0.06),
+        color: const Color(0xFF1C1C20),
         child: url.isEmpty
             ? Icon(
                 Icons.music_note_rounded,
-                color: Colors.white.withValues(alpha: 0.45),
-                size: size * 0.45,
+                color: Colors.white.withValues(alpha: 0.35),
+                size: size * 0.42,
               )
             : Image.network(
                 url,
@@ -562,8 +560,8 @@ class ArtworkImage extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => Icon(
                   Icons.music_note_rounded,
-                  color: Colors.white.withValues(alpha: 0.45),
-                  size: size * 0.45,
+                  color: Colors.white.withValues(alpha: 0.35),
+                  size: size * 0.42,
                 ),
               ),
       ),
@@ -581,7 +579,7 @@ class AnimatedEqBars extends StatefulWidget {
     super.key,
     required this.isPlaying,
     required this.color,
-    this.size = 20,
+    this.size = 18,
   });
 
   @override
@@ -651,12 +649,14 @@ class _AnimatedEqBarsState extends State<AnimatedEqBars>
   }
 }
 
+/// BitChord / Apple Music clean borderless track row with subtle hairline divider.
 class TrackTile extends StatelessWidget {
   final Track track;
   final bool isCurrent;
   final bool isPlaying;
   final bool isFavorite;
   final Color accentColor;
+  final bool showDivider;
   final VoidCallback onTap;
   final VoidCallback? onFavoriteTap;
   final VoidCallback? onAddQueue;
@@ -668,7 +668,8 @@ class TrackTile extends StatelessWidget {
     required this.isCurrent,
     required this.isPlaying,
     required this.isFavorite,
-    this.accentColor = const Color(0xFFFF375F),
+    this.accentColor = Colors.white,
+    this.showDivider = true,
     required this.onTap,
     this.onFavoriteTap,
     this.onAddQueue,
@@ -677,122 +678,120 @@ class TrackTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = LemielTheme.of(context);
     return SpringTap(
-      pressedScale: 0.98,
+      pressedScale: 0.985,
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.symmetric(vertical: 2),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: isCurrent
             ? BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                color: theme.isClassic
-                    ? Color.alphaBlend(
-                        accentColor.withValues(alpha: 0.15),
-                        theme.surface,
-                      )
-                    : accentColor.withValues(alpha: 0.13),
-                border: Border.all(
-                  color: accentColor.withValues(alpha: 0.38),
-                  width: 0.9,
-                ),
+                borderRadius: BorderRadius.circular(14),
+                color: Colors.white.withValues(alpha: 0.08),
               )
-            : BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                color: Colors.transparent,
-              ),
-        child: Row(
+            : null,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Stack(
-              alignment: Alignment.center,
+            Row(
               children: [
-                ArtworkImage(url: track.artworkUrl, size: 52, radius: 13),
-                if (isCurrent)
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(13),
-                      color: Colors.black.withValues(alpha: 0.50),
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    ArtworkImage(url: track.artworkUrl, size: 50, radius: 9),
+                    if (isCurrent)
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(9),
+                          color: Colors.black.withValues(alpha: 0.52),
+                        ),
+                        alignment: Alignment.center,
+                        child: AnimatedEqBars(
+                          isPlaying: isPlaying,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        track.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight:
+                              isCurrent ? FontWeight.w700 : FontWeight.w500,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        track.formattedDuration.isNotEmpty
+                            ? '${track.artist}  ·  ${track.formattedDuration}'
+                            : track.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF8E8E93),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onFavoriteTap != null)
+                  IconButton(
+                    onPressed: onFavoriteTap,
+                    icon: Icon(
+                      isFavorite
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: isFavorite
+                          ? Colors.white
+                          : const Color(0xFF636366),
+                      size: 19,
                     ),
-                    alignment: Alignment.center,
-                    child: AnimatedEqBars(
-                      isPlaying: isPlaying,
-                      color: accentColor,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                if (onAddToPlaylist != null)
+                  IconButton(
+                    onPressed: onAddToPlaylist,
+                    tooltip: 'Thêm vào Playlist',
+                    icon: const Icon(
+                      Icons.more_horiz_rounded,
+                      color: Color(0xFF8E8E93),
                       size: 20,
                     ),
+                    visualDensity: VisualDensity.compact,
+                  )
+                else if (onAddQueue != null)
+                  IconButton(
+                    onPressed: onAddQueue,
+                    tooltip: 'Thêm vào hàng đợi',
+                    icon: const Icon(
+                      Icons.queue_play_next_rounded,
+                      color: Color(0xFF8E8E93),
+                      size: 19,
+                    ),
+                    visualDensity: VisualDensity.compact,
                   ),
               ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isCurrent ? accentColor : Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    track.formattedDuration.isNotEmpty
-                        ? '${track.artist}  •  ${track.formattedDuration}'
-                        : track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.58),
-                      fontSize: 12.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (onFavoriteTap != null)
-              IconButton(
-                onPressed: onFavoriteTap,
-                icon: Icon(
-                  isFavorite
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  color: isFavorite
-                      ? accentColor
-                      : Colors.white.withValues(alpha: 0.45),
-                  size: 20,
-                ),
-                visualDensity: VisualDensity.compact,
-              ),
-            if (onAddToPlaylist != null)
-              IconButton(
-                onPressed: onAddToPlaylist,
-                tooltip: 'Thêm vào Playlist',
-                icon: Icon(
-                  Icons.playlist_add_rounded,
-                  color: Colors.white.withValues(alpha: 0.50),
-                  size: 21,
-                ),
-                visualDensity: VisualDensity.compact,
-              )
-            else if (onAddQueue != null)
-              IconButton(
-                onPressed: onAddQueue,
-                tooltip: 'Thêm vào hàng đợi',
-                icon: Icon(
-                  Icons.queue_play_next_rounded,
-                  color: Colors.white.withValues(alpha: 0.50),
-                  size: 20,
-                ),
-                visualDensity: VisualDensity.compact,
+            if (showDivider && !isCurrent)
+              Padding(
+                padding: const EdgeInsets.only(left: 63, top: 8),
+                child: Container(height: 0.5, color: const Color(0xFF1E1E22)),
               ),
           ],
         ),

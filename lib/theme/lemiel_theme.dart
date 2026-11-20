@@ -1,9 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 import '../models/app_settings.dart';
 
-/// Unified visual design tokens powering both Liquid Glass and Classic themes.
-/// Both modes share identical layout, spacing, typography, and controls — only
-/// surfaces, background depth, and glass intensity adapt cleanly.
+/// BitChord + Mochy Music inspired pure monochrome obsidian design tokens.
+/// Default accent is pure White (#FFFFFF) on pitch Black (#000000) — color
+/// comes from actual album artwork rather than garish red UI chrome.
 @immutable
 class LemielTheme extends ThemeExtension<LemielTheme> {
   final AppVisualTheme visualTheme;
@@ -18,14 +18,20 @@ class LemielTheme extends ThemeExtension<LemielTheme> {
 
   bool get isClassic => visualTheme == AppVisualTheme.classic;
   bool get isLiquidGlass => visualTheme == AppVisualTheme.liquidGlass;
+  Color get onAccent =>
+      accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
 
-  Color get canvas => isClassic ? const Color(0xFF0E1016) : const Color(0xFF06060A);
-  Color get surface => isClassic ? const Color(0xFF171A23) : const Color(0xFF161622);
+  // BitChord & Mochy exact neutral OLED hierarchy
+  Color get canvas => const Color(0xFF000000);
+  Color get surface =>
+      isClassic ? const Color(0xFF141417) : const Color(0xFF121215);
+  Color get surfaceVariant =>
+      isClassic ? const Color(0xFF1C1C20) : const Color(0xFF1B1B1F);
   Color get surfaceElevated =>
-      isClassic ? const Color(0xFF1F2330) : const Color(0xFF1A1A26);
-  Color get border => isClassic
-      ? Colors.white.withValues(alpha: 0.09)
-      : Colors.white.withValues(alpha: 0.22);
+      isClassic ? const Color(0xFF222227) : const Color(0xFF1C1C20);
+  Color get textSecondary => const Color(0xFF8E8E93);
+  Color get textMuted => const Color(0xFF636366);
+  Color get divider => const Color(0xFF222226);
 
   static LemielTheme fromSettings(AppSettings s) => LemielTheme(
         visualTheme: s.visualTheme,
@@ -37,7 +43,7 @@ class LemielTheme extends ThemeExtension<LemielTheme> {
     return Theme.of(context).extension<LemielTheme>() ??
         const LemielTheme(
           visualTheme: AppVisualTheme.liquidGlass,
-          accent: Color(0xFFFF375F),
+          accent: Color(0xFFFFFFFF),
           highGlass: true,
         );
   }

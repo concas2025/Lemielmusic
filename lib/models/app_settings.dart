@@ -17,11 +17,12 @@ enum AudioQualityTier { auto, high, medium, low }
 enum GlassQuality { high, performance }
 
 enum AccentPreset {
-  rose(Color(0xFFFF375F), 'Hồng Rose'),
-  indigo(Color(0xFF6E6BF5), 'Tím Indigo'),
+  monochrome(Color(0xFFFFFFFF), 'Trắng Obsidian'),
+  silver(Color(0xFFD0D5E0), 'Bạc Titanium'),
+  indigo(Color(0xFF7B78FF), 'Tím Indigo'),
   emerald(Color(0xFF2DD4BF), 'Ngọc Lục'),
-  amber(Color(0xFFFF9F0A), 'Hổ Phách'),
-  silver(Color(0xFFD8E0F0), 'Bạc Liquid');
+  amber(Color(0xFFFFB340), 'Hổ Phách'),
+  rose(Color(0xFFFF4F79), 'Hồng Rose');
 
   final Color color;
   final String label;
@@ -74,13 +75,13 @@ class AppSettings {
     this.visualTheme = AppVisualTheme.liquidGlass,
     this.playerStyle = PlayerStyle.flagship,
     this.backgroundStyle = PlayerBackgroundStyle.ambientGlow,
-    this.sliderStyle = SliderStyle.mochyWavy,
+    this.sliderStyle = SliderStyle.appleSlim,
     this.lyricsStyle = LyricsStyle.appleGlow,
     this.lyricsAlign = LyricsAlign.left,
-    this.lyricsFontSize = 21.0,
+    this.lyricsFontSize = 22.0,
     this.blurInactiveLyrics = true,
     this.audioQuality = AudioQualityTier.high,
-    this.accentPreset = AccentPreset.rose,
+    this.accentPreset = AccentPreset.monochrome,
     this.glassQuality = GlassQuality.high,
     this.lyricsProviderOrder = defaultLyricsProviders,
     this.enabledLyricsProviders = defaultLyricsProviders,
@@ -91,6 +92,11 @@ class AppSettings {
   });
 
   Color get accentColor => accentPreset.color;
+  bool get isMonochrome =>
+      accentPreset == AccentPreset.monochrome ||
+      accentPreset == AccentPreset.silver;
+  Color get onAccentColor =>
+      accentColor.computeLuminance() > 0.55 ? Colors.black : Colors.white;
   bool get isClassic => visualTheme == AppVisualTheme.classic;
   bool get highGlass =>
       visualTheme == AppVisualTheme.liquidGlass &&
@@ -209,7 +215,7 @@ class AppSettings {
       sliderStyle: enumByName(
         SliderStyle.values,
         json['sliderStyle'] as String?,
-        SliderStyle.mochyWavy,
+        SliderStyle.appleSlim,
       ),
       lyricsStyle: enumByName(
         LyricsStyle.values,
@@ -222,7 +228,7 @@ class AppSettings {
         LyricsAlign.left,
       ),
       lyricsFontSize:
-          ((json['lyricsFontSize'] as num?)?.toDouble() ?? 21.0).clamp(16.0, 28.0),
+          ((json['lyricsFontSize'] as num?)?.toDouble() ?? 22.0).clamp(16.0, 28.0),
       blurInactiveLyrics: json['blurInactiveLyrics'] as bool? ?? true,
       audioQuality: enumByName(
         AudioQualityTier.values,
@@ -232,7 +238,7 @@ class AppSettings {
       accentPreset: enumByName(
         AccentPreset.values,
         json['accentPreset'] as String?,
-        AccentPreset.rose,
+        AccentPreset.monochrome,
       ),
       glassQuality: enumByName(
         GlassQuality.values,

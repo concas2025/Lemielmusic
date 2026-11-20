@@ -54,6 +54,7 @@ void main() {
     await ctrl.init();
 
     expect(ctrl.settings.visualTheme, AppVisualTheme.liquidGlass);
+    expect(ctrl.settings.accentPreset, AccentPreset.monochrome);
     ctrl.setVisualTheme(AppVisualTheme.classic);
     expect(ctrl.settings.visualTheme, AppVisualTheme.classic);
     expect(ctrl.settings.isClassic, isTrue);
@@ -322,7 +323,7 @@ void main() {
     );
 
     expect(find.text('Liquid Lemiel'), findsOneWidget);
-    expect(find.text('THẺ THÀNH VIÊN'), findsOneWidget);
+    expect(find.text('ID CARD OF'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.search_rounded));
     await tester.pump();
@@ -416,7 +417,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('Audio Lab'), findsOneWidget);
+    expect(find.text('Audio\nLab'), findsOneWidget);
 
     await tester.pumpWidget(
       MaterialApp(

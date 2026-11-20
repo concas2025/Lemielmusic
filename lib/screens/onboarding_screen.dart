@@ -264,14 +264,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                         const SizedBox(width: 8),
                                     itemBuilder: (_, idx) {
                                       final grad = idx == 0
-                                          ? [
-                                              accent,
-                                              Color.lerp(
-                                                accent,
-                                                const Color(0xFF5E5CE6),
-                                                0.55,
-                                              )!,
-                                            ]
+                                          ? (settings.isMonochrome
+                                              ? const [
+                                                  Color(0xFF3A3A40),
+                                                  Color(0xFF1A1A1E),
+                                                ]
+                                              : [
+                                                  accent,
+                                                  Color.lerp(
+                                                    accent,
+                                                    Colors.black,
+                                                    0.45,
+                                                  )!,
+                                                ])
                                           : UserProfile.avatarGradients[idx];
                                       final active =
                                           _avatarPath == null && _avatarPreset == idx;
@@ -383,19 +388,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(26),
                           color: accent,
-                          boxShadow: [
-                            BoxShadow(
-                              color: accent.withValues(alpha: 0.35),
-                              blurRadius: 20,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
                         ),
                         alignment: Alignment.center,
-                        child: const Text(
+                        child: Text(
                           'Bắt đầu nghe nhạc',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: settings.onAccentColor,
                             fontSize: 15.5,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.2,
@@ -482,12 +480,10 @@ class _ThemeChoiceTile extends StatelessWidget {
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          color: selected
-              ? accent.withValues(alpha: 0.22)
-              : Colors.white.withValues(alpha: 0.06),
+          color: selected ? const Color(0xFF1F1F24) : const Color(0xFF141417),
           border: Border.all(
-            color: selected ? accent : Colors.white.withValues(alpha: 0.12),
-            width: selected ? 1.4 : 0.9,
+            color: selected ? accent : Colors.transparent,
+            width: selected ? 1.4 : 0.0,
           ),
         ),
         child: Column(
