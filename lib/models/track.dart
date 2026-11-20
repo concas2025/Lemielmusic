@@ -39,15 +39,19 @@ class Track {
     return '$m:$s';
   }
 
-  MediaItem toMediaItem() => MediaItem(
-        id: id,
-        title: title,
-        artist: artist,
-        album: album.isNotEmpty ? album : 'Lemielmusic',
-        artUri: artworkUrl.isNotEmpty ? Uri.tryParse(artworkUrl) : null,
-        duration:
-            durationSeconds > 0 ? Duration(seconds: durationSeconds) : null,
-      );
+  MediaItem toMediaItem({Duration? durationOverride}) {
+    final effectiveDur = (durationOverride != null && durationOverride > Duration.zero)
+        ? durationOverride
+        : (durationSeconds > 0 ? Duration(seconds: durationSeconds) : null);
+    return MediaItem(
+      id: id,
+      title: title,
+      artist: artist,
+      album: album.isNotEmpty ? album : 'Lemielmusic',
+      artUri: artworkUrl.isNotEmpty ? Uri.tryParse(artworkUrl) : null,
+      duration: effectiveDur,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -108,11 +112,13 @@ class ResolvedAudioStream {
   final int contentLength;
   final String mimeType;
   final String userAgent;
+  final Duration? duration;
 
   const ResolvedAudioStream({
     required this.url,
     required this.contentLength,
     this.mimeType = 'audio/mp4',
     required this.userAgent,
+    this.duration,
   });
 }

@@ -269,6 +269,89 @@ void main() {
     }
   });
 
+  test('fMP4 moov duration normalization and AVPlayer 2x duration guard', () {
+    Uint8List box(String type, Uint8List payload) {
+      final out = Uint8List(8 + payload.length);
+      final bd = ByteData.sublistView(out);
+      bd.setUint32(0, out.length);
+      for (int i = 0; i < 4; i++) {
+        out[4 + i] = type.codeUnitAt(i);
+      }
+      out.setRange(8, out.length, payload);
+      return out;
+    }
+
+    Uint8List concat(List<Uint8List> parts) {
+      final builder = BytesBuilder(copy: false);
+      for (final p in parts) {
+        builder.add(p);
+      }
+      return builder.takeBytes();
+    }
+
+    // Build mvhd (v0), tkhd (v0), mdhd (v0) with non-zero duration = 12272640
+    final mvhdBody = Uint8List(100);
+    ByteData.sublistView(mvhdBody)
+      ..setUint32(12, 44100)
+      ..setUint32(16, 12272640);
+    final tkhdBody = Uint8List(84);
+    ByteData.sublistView(tkhdBody).setUint32(20, 12272640);
+    final mdhdBody = Uint8List(24);
+    ByteData.sublistView(mdhdBody)
+      ..setUint32(12, 44100)
+      ..setUint32(16, 12272640);
+
+    final ftyp = box('ftyp', Uint8List(16));
+    final trak = box(
+      'trak',
+      concat([box('tkhd', tkhdBody), box('mdia', box('mdhd', mdhdBody))]),
+    );
+    final fmp4 = concat([
+      ftyp,
+      box('moov', concat([box('mvhd', mvhdBody), box('mvex', Uint8List(16)), trak])),
+    ]);
+    final originalLen = fmp4.length;
+
+    expect(LocalAudioProxy.normalizeFragmentedMp4Header(fmp4), isTrue);
+    expect(fmp4.length, originalLen);
+    // Verify mvhd, tkhd, mdhd durations are all zeroed
+    final bd = ByteData.sublistView(fmp4);
+    // ftyp(24) + moov hdr(8) + mvhd hdr(8) + durOff(16) = 56
+    expect(bd.getUint32(56), 0);
+
+    // Progressive MP4 (no mvex) must remain untouched
+    final progMvhd = Uint8List.fromList(mvhdBody);
+    final progressive = concat([ftyp, box('moov', box('mvhd', progMvhd))]);
+    expect(LocalAudioProxy.normalizeFragmentedMp4Header(progressive), isFalse);
+    expect(ByteData.sublistView(progressive).getUint32(56), 12272640);
+
+    // PlayerController rejects 2x phantom duration (e.g. 8:40 / 10:10 for 4:20 / 5:05)
+    expect(
+      PlayerController.resolveEffectiveDuration(
+        reported: const Duration(minutes: 10, seconds: 10),
+        known: const Duration(minutes: 5, seconds: 5),
+        current: const Duration(minutes: 5, seconds: 5),
+      ),
+      const Duration(minutes: 5, seconds: 5),
+    );
+    expect(
+      PlayerController.resolveEffectiveDuration(
+        reported: const Duration(minutes: 4, seconds: 21),
+        known: const Duration(minutes: 4, seconds: 20),
+        current: const Duration(minutes: 4, seconds: 20),
+      ),
+      const Duration(minutes: 4, seconds: 21),
+    );
+    expect(
+      PlayerController.resolveEffectiveDuration(
+        reported: const Duration(minutes: 3, seconds: 45),
+        known: null,
+        current: Duration.zero,
+      ),
+      const Duration(minutes: 3, seconds: 45),
+    );
+  });
+
   testWidgets('Liquid Glass & Classic themes, Floating Dock, ID Card & Customisation work cleanly', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final storage = StorageService();

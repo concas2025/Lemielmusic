@@ -28,6 +28,7 @@ class PlayerController extends ChangeNotifier {
   PlayerRepeatMode _repeatMode = PlayerRepeatMode.off;
   String? _errorMessage;
   Duration _duration = Duration.zero;
+  Duration? _knownDuration;
   int _playSeq = 0;
   int _recoveryAttemptsForTrack = 0;
   bool _recovering = false;
@@ -129,8 +130,18 @@ class PlayerController extends ChangeNotifier {
     }));
 
     _subs.add(_player.durationStream.listen((d) {
-      if (d != null && d != _duration) {
-        _duration = d;
+      final effective = resolveEffectiveDuration(
+        reported: d,
+        known: _knownDuration,
+        current: _duration,
+      );
+      if (d != null && effective != d) {
+        debugPrint(
+          '[LemielAudio] Ignored anomalous AVPlayer duration=${d.inSeconds}s (keeping known=${_knownDuration?.inSeconds}s)',
+        );
+      }
+      if (effective != _duration) {
+        _duration = effective;
         notifyListeners();
       }
     }));
@@ -164,6 +175,28 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Guards against iOS AVPlayer reporting 2x/phantom durations on YouTube fMP4
+  /// streams by comparing against YouTube's authoritative track/stream duration.
+  @visibleForTesting
+  static Duration resolveEffectiveDuration({
+    required Duration? reported,
+    required Duration? known,
+    required Duration current,
+  }) {
+    final hasKnown = known != null && known > Duration.zero;
+    if (reported == null || reported <= Duration.zero) {
+      return hasKnown ? known : current;
+    }
+    if (hasKnown) {
+      final knownMs = known.inMilliseconds;
+      final repMs = reported.inMilliseconds;
+      if (repMs > knownMs * 1.35 + 5000 || repMs < knownMs * 0.65 - 5000) {
+        return known;
+      }
+    }
+    return reported;
+  }
+
   Future<void> _recoverMidTrack(Track track, Duration resumeAt) async {
     final seq = _playSeq;
     _recovering = true;
@@ -183,11 +216,19 @@ class PlayerController extends ChangeNotifier {
       );
       if (seq != _playSeq) return;
 
+      if (fresh.duration != null && fresh.duration! > Duration.zero) {
+        _knownDuration = fresh.duration;
+        _duration = fresh.duration!;
+      }
+
       final playUri = await _proxy.registerStream(track.id, fresh);
       if (seq != _playSeq) return;
 
       await _player.setAudioSource(
-        AudioSource.uri(playUri, tag: track.toMediaItem()),
+        AudioSource.uri(
+          playUri,
+          tag: track.toMediaItem(durationOverride: _knownDuration),
+        ),
         initialPosition: resumeAt,
       );
       if (seq != _playSeq) return;
@@ -331,9 +372,10 @@ class PlayerController extends ChangeNotifier {
     _recoveryAttemptsForTrack = 0;
     _errorMessage = null;
     _isLoadingStream = true;
-    _duration = track.durationSeconds > 0
+    _knownDuration = track.durationSeconds > 0
         ? Duration(seconds: track.durationSeconds)
-        : Duration.zero;
+        : null;
+    _duration = _knownDuration ?? Duration.zero;
     _recordHistory(track);
     settingsController.recordTrackPlay(track.artist);
     notifyListeners();
@@ -343,12 +385,18 @@ class PlayerController extends ChangeNotifier {
       final resolved = await ytm.resolveAudioStream(track.id, quality: quality);
       if (seq != _playSeq) return;
 
+      if (resolved.duration != null && resolved.duration! > Duration.zero) {
+        _knownDuration = resolved.duration;
+        _duration = resolved.duration!;
+        notifyListeners();
+      }
+
       final playUri = await _proxy.registerStream(track.id, resolved);
       if (seq != _playSeq) return;
 
       final source = AudioSource.uri(
         playUri,
-        tag: track.toMediaItem(),
+        tag: track.toMediaItem(durationOverride: _knownDuration),
       );
       await _player.setAudioSource(source);
       if (seq != _playSeq) return;
@@ -401,7 +449,14 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) {
+    final target = position < Duration.zero
+        ? Duration.zero
+        : (_duration > Duration.zero && position > _duration
+            ? _duration
+            : position);
+    return _player.seek(target);
+  }
 
   Future<void> next({bool autoAdvance = false}) async {
     if (_queue.isEmpty) return;

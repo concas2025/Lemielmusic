@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import '../models/track.dart';
 
 class LocalAudioProxy {
@@ -11,6 +12,8 @@ class LocalAudioProxy {
     bool enableCache = true,
   }) async =>
       Uri.parse(stream.url);
+
+  static bool normalizeFragmentedMp4Header(Uint8List bytes) => false;
 
   bool isFullyCached(String id) => false;
 
